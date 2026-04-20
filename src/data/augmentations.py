@@ -84,7 +84,7 @@ class Rescale(object):
     items out : x10, x20, x60, day, year, labels
     """
 
-    def __init__(self, output_size: torch.Tuple[int, int]):
+    def __init__(self, output_size: Tuple[int, int]):
         assert isinstance(output_size, (tuple,))
         self.new_h, self.new_w = output_size
 
