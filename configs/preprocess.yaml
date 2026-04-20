@@ -1,7 +1,0 @@
-defaults:
-  - _self_
-  - global_config
-
-split_path: "/media/data/boreal_data/full/COPERNICUS/UPDATE/split_one_hard.json"
-suffix: "one"
-num_workers: 10

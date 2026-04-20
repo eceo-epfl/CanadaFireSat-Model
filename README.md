@@ -96,6 +96,7 @@ Those models are trained across three data settings namely:
 
 ## 🛠️ Set-Up
 
+- ⚠️ For best compatibility, use Python 3.8.x .
 - In order to log the model training, you need to set-up a WandB profile or switch model loggers. You can specify your WandB information in `global_config.yaml`.
 
 - Then, you also need to install the Python virtual environment:
@@ -103,6 +104,7 @@ Those models are trained across three data settings namely:
 ```bash
 python -m venv fire-env
 source fire-env/bin/activate
+pip install --upgrade pip setuptools wheel
 pip install -r requirements/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu117
 ```
 
