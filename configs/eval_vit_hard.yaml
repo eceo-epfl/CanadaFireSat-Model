@@ -52,14 +52,14 @@ DATASETS:
     # bands: possibility to specify the selected bands.
   train:
     paths: "${paths.split_hard}"
-    base_dir: ["${paths.pos_sits}", ${paths.neg_sits_hard}"]
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits_hard}"]
     label_dir: "${paths.label}"
     batch_size: 12
     num_workers: 8
 
   eval:
     paths: "${paths.split_hard}"
-    base_dir: ["${paths.pos_sits}", ${paths.neg_sits_hard}"]
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits_hard}"]
     label_dir: "${paths.label}"
     batch_size: 12
     num_workers: 8

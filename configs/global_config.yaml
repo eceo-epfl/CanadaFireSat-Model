@@ -21,7 +21,7 @@ paths:
   neg_sits_hard: "/media/data/boreal_data/full/COPERNICUS/UPDATE/S2_SERIES_SEAS_FORMAT_NEG_HARD"
   bands_mean: "/media/data/boreal_data/full/COPERNICUS/UPDATE/bands_mean.json"
   bands_std: "/media/data/boreal_data/full/COPERNICUS/UPDATE/bands_std.json"
-  hf_data: "/home/hporta/code_project/wildfire-forecast/wildfire-highres-multimodal/hug_data"
+  hf_data: "/media/data/boreal_data/hug_data"
   pos_env_spa: "/media/data/boreal_data/TS_SPATIAL_UPDATE"
   neg_env_spa: "/media/data/boreal_data/NEG_TS_SPATIAL_UPDATE"
   neg_env_spa_hard: "/media/data/boreal_data/NEG_TS_SPATIAL_UPDATE_HARD"

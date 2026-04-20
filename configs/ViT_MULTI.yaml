@@ -61,14 +61,14 @@ DATASETS:
     # bands: possibility to specify the selected bands.
   train:
     paths: "${paths.split}"
-    base_dir: ["${paths.pos_sits}", ${paths.neg_sits}"]
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
     label_dir: "${paths.label}"
     batch_size: 24
     num_workers: 8
 
   eval:
     paths: "${paths.split}"
-    base_dir: ["${paths.pos_sits}", ${paths.neg_sits}"]
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
     label_dir: "${paths.label}"
     batch_size: 24
     num_workers: 8
