@@ -5,7 +5,7 @@ from pytorch_lightning import LightningDataModule
 
 from src.constants import ENV_SOURCE_COLS, TAB_SOURCE_COLS
 from src.data.augmentations import MixHVFlip
-from src.data.Canada.data_transforms import (
+from src.data.Canada.data_transforms_prev import (
     Canada_segmentation_transform,
     EnvCanada_segmentation_transform,
     TabCanada_segmentation_transform,

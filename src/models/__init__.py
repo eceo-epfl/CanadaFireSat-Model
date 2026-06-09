@@ -3,7 +3,7 @@ from src.models.module_tab import TabModule
 
 
 def get_model(config, device):
-    if config["MODEL"]["architecture"] in ["TSViT", "ConvLSTM", "ResNet", "ViT", "ViTFacto"]:
+    if config["MODEL"]["architecture"] in ["TSViT", "ConvLSTM", "ResNet", "ViT", "ViTFacto", "MSClipFacto"]:
         return ImgModule(config).to(device)
 
     elif config["MODEL"]["architecture"] in [

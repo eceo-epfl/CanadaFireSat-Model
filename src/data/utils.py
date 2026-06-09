@@ -1,15 +1,16 @@
 """Utils functions for Data Processing"""
+from copy import deepcopy
 import json
 import os
-from typing import Dict, List, Tuple, Union
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import rasterio
 import torch
 import torchvision.transforms as transforms
-from PIL import Image
 
 from src.constants import BANDS_10, BANDS_20, BANDS_60
+from src.data.augmentations import CutOrPad
 
 
 # Adapted from deepsat.data
@@ -27,7 +28,7 @@ def segmentation_ground_truths(sample: Dict[str, torch.Tensor]) -> Tuple[torch.T
 
 
 # Keep the relative order of BANDS_10, BANDS_20, BANDS_60 for normalization: based on preprocessing and/or __adapt__ method
-def extract_stats(stats_path: os.PathLike, bands: List[str]) -> np.ndarray:
+def _extract_stats(stats_path: os.PathLike, bands: List[str]) -> np.ndarray:
 
     with open(stats_path, "r") as f:
         json_stats = json.load(f)
@@ -44,3 +45,22 @@ def extract_stats(stats_path: os.PathLike, bands: List[str]) -> np.ndarray:
 
     stats_array = np.concatenate([stats_array_10x, stats_array_20x, stats_array_60x], axis=1)
     return stats_array
+
+
+def _load_json_stats(stats_dir: Path, source: str, cols: List[str], shape: tuple):
+    cols = sorted(cols)
+    with open(stats_dir / f"{source}_mean.json") as f:
+        mean = np.array([json.load(f)[c] for c in cols], dtype=np.float32).reshape(shape)
+    with open(stats_dir / f"{source}_std.json") as f:
+        std = np.array([json.load(f)[c] for c in cols], dtype=np.float32).reshape(shape)
+    return mean, std
+
+
+def _cutorpad(max_seq_len: Optional[int], sampling_type: str, mode: str = "image", flag_doy_process: bool = False):
+    if max_seq_len is None:
+        if mode == "image":
+            return [transforms.Lambda(
+                lambda sample: {**sample, "seq_lengths": deepcopy(sample["inputs"].shape[0])}
+            )]
+        return []
+    return [CutOrPad(max_seq_len=max_seq_len, sampling_type=sampling_type, mode=mode, flag_doy_process=flag_doy_process)]

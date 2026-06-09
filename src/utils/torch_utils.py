@@ -26,38 +26,53 @@ def load_from_checkpoint(model: LightningModule, checkpoint: Optional[str] = Non
 
 
 def get_trainable_params(
-    model: LightningModule, model_type: str, lr_ratio: float, lr: float, mode: str
+    model: LightningModule, model_type: str, lr_ratio: float, lr: float, mode: str, weight_decay: float = 0.0
 ) -> Union[List[Dict[str, Any]], None]:
     """Provide the list of trainable parameters with the assigned learning rate."""
 
     if mode == "full":
-        trainable_params = list(model.parameters())
-        return [{"params": trainable_params, "lr": lr}]
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        return [{"params": trainable_params, "lr": lr, "weight_decay": weight_decay}]
+
+    if mode == "msclip":
+        base_params, pool_params, vpt_params = [], [], []
+        for n, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            is_vpt = "vpt" in n
+            is_mixer = "temporal_mixer" in n
+            (vpt_params if is_vpt else pool_params if is_mixer else base_params).append(p)
+
+        return [
+            {"params": base_params,  "lr": lr,       "weight_decay": weight_decay},
+            {"params": pool_params,  "lr": lr * 0.1, "weight_decay": 0.0},
+            {"params": vpt_params,   "lr": lr * 0.1, "weight_decay": weight_decay},
+        ]
 
     if mode == "adaptive":
 
         if model_type == "ResNet":
-            encoder_params = list(model.encoder.parameters())
-            decoder_params = list(model.decoder.parameters())
-            temp_encoder_params = list(model.blocks_conv_lstm.parameters())
-            head_params = list(model.linear_head.parameters())
+            encoder_params = [p for p in model.encoder.parameters() if p.requires_grad]
+            decoder_params = [p for p in model.decoder.parameters() if p.requires_grad]
+            temp_encoder_params = [p for p in model.blocks_conv_lstm.parameters() if p.requires_grad]
+            head_params = [p for p in model.linear_head.parameters() if p.requires_grad]
 
             return [
-                {"params": encoder_params, "lr": lr_ratio * lr},
-                {"params": decoder_params, "lr": lr},
-                {"params": temp_encoder_params, "lr": lr},
-                {"params": head_params, "lr": lr},
+                {"params": encoder_params, "lr": lr_ratio * lr, "weight_decay": weight_decay},
+                {"params": decoder_params, "lr": lr, "weight_decay": weight_decay},
+                {"params": temp_encoder_params, "lr": lr, "weight_decay": weight_decay},
+                {"params": head_params, "lr": lr, "weight_decay": weight_decay},
             ]
 
         if model_type == "ViT":
-            encoder_params = list(model.features.parameters())
-            emb_proj = list(model.proj.parameters())
-            head_params = list(model.head.parameters())
+            encoder_params = [p for p in model.features.parameters() if p.requires_grad]
+            emb_proj = [p for p in model.proj.parameters() if p.requires_grad]
+            head_params = [p for p in model.head.parameters() if p.requires_grad]
 
             return [
-                {"params": encoder_params, "lr": lr_ratio * lr},
-                {"params": emb_proj, "lr": lr},
-                {"params": head_params, "lr": lr},
+                {"params": encoder_params, "lr": lr_ratio * lr, "weight_decay": weight_decay},
+                {"params": emb_proj, "lr": lr, "weight_decay": weight_decay},
+                {"params": head_params, "lr": lr, "weight_decay": weight_decay},
             ]
 
         raise NotImplementedError(f"Model {type(model)} not implemented for adaptive learning rate")

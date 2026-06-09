@@ -32,11 +32,12 @@ BANDS_ALL = [
 BANDS_10 = ["B4", "B3", "B2", "B8"]
 BANDS_20 = ["B5", "B6", "B7", "B8A", "B11", "B12"]
 BANDS_60 = ["B1", "B9", "B10"]
-TARGET_BAND = "B4"
 LABEL_IMG_RES = 264
 LABEL_IMG_RES_LOW = 260
 LABEL_RES = 26
 ORDER_INDEX = [10, 2, 1, 0, 4, 5, 6, 3, 7, 11, 12, 8, 9]
+MSCLIP_ORDER_10 = [2, 1, 0, 4, 5, 6, 3, 7, 8, 9]
+S2_UINT_TO_REFLECTANCE = 10000.0 / 255.0
 
 # Environment Canada Constants
 TAB_SOURCE_COLS = {

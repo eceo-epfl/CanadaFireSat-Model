@@ -1,0 +1,23 @@
+defaults:
+  - _self_
+  - global_config
+
+model:
+  model_name: Llama3-MS-CLIP-Base
+  pretrained: True
+  channels: 10
+  ckpt_path: null
+  num_classes: 2
+
+download_captions: False
+captions_dir: "/home/hporta/code_project/wildfire-forecast/CanadaFireSat-Model/boreal_data/SSL4EO-captions"
+dict_dir: "/home/hporta/code_project/wildfire-forecast/CanadaFireSat-Model/results/DictionnaryWordsGeneral"
+method_type: "pke"
+min_freq: 1
+max_terms: 1500000
+max_ngram: 5
+use_msclip: True
+top_k_per_sentence: 2
+msclip_batch_size: 128
+use_parser: False
+pke_extractor: "Yake"

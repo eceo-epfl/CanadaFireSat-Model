@@ -1,0 +1,117 @@
+defaults:
+  - _self_
+  - global_config
+
+MODEL:
+  architecture:  "MSClipFacto"
+  model_name: Llama3-MS-CLIP-Base
+  patch_size: 16
+  pretrained: True
+  ds_labels: True
+  freeze_msclip: True
+  input_img_res: 264
+  img_res: 256
+  train_max_seq_len: 5
+  val_max_seq_len: 5
+  input_dim: 10
+  num_classes: 2
+  out_H: 25
+  out_W: 25
+  threshold: 0.5
+  use_mixer: True
+  use_doy: True
+  use_cls_fusion: False
+  upscale_factor: 1
+  clearclip:
+    enabled: False
+    n_last: 1
+    keep_ffn: False        # should be false for ClearCLIP
+    keep_residual: False   # should be false for ClearCLIP
+    attn_variant: "qq"
+  vpt_config:
+    enabled: True
+    num_tokens: 20
+    total_d_layer: 11
+
+SOLVER:
+  num_epochs: 20
+  num_warmup_epochs: 2
+  pos_weight: 6.7
+  loss_function: combined_dice_ce
+  lr_scheduler: 'cosine'
+  lr_base: 5e-5
+  lr_min: 1e-6
+  lr_start: 1e-6
+  num_cycles: 1
+  weight_decay: 0.01
+  accumulate_grad_batches: 2
+  interval: "epoch"
+  lr_mode: "msclip"
+
+### Leveraging RAW *.npy files ###
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+
+  test:
+
+### Leveraging Hf parquet files ###
+#DATASETS:
+#  mode: "huggingface"
+#  kwargs:
+#    mean_file: "${paths.bands_mean}"
+#    std_file: "${paths.bands_std}"
+#    with_loc: False
+#    with_doy: True
+    # bands: possibility to specify the selected bands.
+#  train:
+#    data_dir: "${paths.hf_data}"
+#    batch_size: 24
+#    num_workers: 8
+#
+#  eval:
+#    data_dir: "${paths.hf_data}"
+#    batch_size: 24
+#    num_workers: 8
+
+CHECKPOINT:
+  load_from_checkpoint:
+  experiment_name: "MIXLOSS_VPT_HIGHLR10X_MSCLIP_SITS_ONLY"
+  save_path: "./results/models"
+  train_metrics_steps: 200
+  save_steps: 10000
+  wandb_project: "${wandb.project}"
+  wandb_user: "${wandb.user}"
+
+SET-UP:
+  seed: 42
+  local_device_ids: [0]

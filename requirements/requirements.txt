@@ -1,13 +1,16 @@
 # Local Code
 -e .
+-e external/ms_clip
+-e external/ms_clip_fork
 
+setuptools==68.2.2
 # Adapted from .yaml file in VITS for SITS
-absl-py==0.9.0
+absl-py>=0.9.0 # Update from deepsat python 3.10
 addict==2.2.1
 astunparse==1.6.3
 cachetools==4.1.1
 chardet==3.0.4
-dataclasses==0.6
+# dataclasses==0.6 Update from deepsat python 3.10
 filelock==3.0.12
 future==0.18.2
 gast==0.3.3
@@ -15,18 +18,18 @@ gdown==3.12.2
 google-auth==1.19.2 # TODO: Check where it is used.
 google-auth-oauthlib==0.4.1
 google-pasta==0.2.0
-grpcio==1.30.0
-h5py==2.10.0
+grpcio>=1.30.0 # Update from deepsat python 3.10
+h5py>=3.0.0 # Update from deepsat python 3.10
 idna==2.10
 keras==2.4.3 # TODO: Check where it is used.
 keras-preprocessing==1.1.2
 markdown==3.2.2
 nibabel==3.1.1
 oauthlib==3.1.0
-opencv-python==4.4.0.46
+opencv-python>=4.5.5 # Update from deepsat python 3.10
 opt-einsum==3.3.0
 packaging
-protobuf==3.12.2
+protobuf>=3.20.0 # Update from deepsat python 3.10
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
 pypng==0.0.20
@@ -38,11 +41,11 @@ scipy==1.10.1
 tensorboard==2.3.0 # TODO: Check where it is used.
 tensorboard-plugin-wit==1.7.0
 termcolor==1.1.0
-torchfcn==1.9.6
+# torchfcn==1.9.6 Update from deepsat python 3.10
 tqdm>=4.48.0
 typing-extensions>=3.7.4.3
 urllib3==1.25.10
-werkzeug==1.0.1
+werkzeug>=2.0.0 # Update from deepsat python 3.10
 wrapt==1.12.1
 yapf==0.30.0
 einops==0.3.2
@@ -72,6 +75,8 @@ peft
 Jinja2
 segmentation-models-pytorch
 datasets
+spacy
+git+https://github.com/boudinfl/pke.git
 
 # FWI baseline
 rasterio

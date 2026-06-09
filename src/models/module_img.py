@@ -1,7 +1,7 @@
 """Script for SITS only lightning module"""
 
 from math import ceil
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ from deepsat.metrics.numpy_metrics import get_classification_metrics
 from deepsat.metrics.torch_metrics import get_binary_metrics, get_mean_metrics
 from deepsat.models.TSViT.TSViTdense import TSViTDown
 from deepsat.utils.lr_scheduler import build_scheduler_pytorch
+from experiments.concept_bottleneck.models.mscliptemporal import MSClipTemporalCBM
 from src.data.utils import segmentation_ground_truths
 from src.eval.utils import get_pr_auc_scores
 from src.models.convlstm import ConvLSTMNet
@@ -61,11 +62,13 @@ class ImgModule(LightningModule):
             return ViTModel(**model_config)
         if model_config["architecture"] == "ViTFacto":
             return ViTFactorizeModel(**model_config)
+        if model_config["architecture"] == "MSClipFacto":
+            return MSClipTemporalCBM(**model_config)
         raise NameError(f"Model architecture {model_config['architecture']} not found")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, doy: Optional[torch.Tensor] = None, seq_len: Optional[int] = None) -> torch.Tensor:
         """Forward call for the module"""
-        return self.model(x)
+        return self.model(x, doy=doy, seq_len=seq_len)
 
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> Dict[str, torch.Tensor]:
         """Step for training"""
@@ -74,7 +77,7 @@ class ImgModule(LightningModule):
         loss = 0
 
         if self.multi_head:
-            outputs, class_outputs = self.model(batch["inputs"])
+            outputs, class_outputs = self.model(batch["inputs"], doy=batch["doy"], seq_len=batch["seq_lengths"])
             class_target = ground_truth[0].long().amax(dim=(1, 2)).reshape(-1)
             class_loss = self.loss_fn["class"](class_outputs, class_target)
             alpha = get_alpha(self.current_epoch)
@@ -83,7 +86,7 @@ class ImgModule(LightningModule):
             self.log("train_class_loss", class_loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
             self.log("alpha", alpha, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         else:
-            outputs = self.model(batch["inputs"])
+            outputs = self.model(batch["inputs"], doy=batch["doy"], seq_len=batch["seq_lengths"])
             seg_weight = 1
 
         outputs = outputs.permute(0, 2, 3, 1)
@@ -115,14 +118,14 @@ class ImgModule(LightningModule):
         loss = 0
 
         if self.multi_head:
-            logits, class_logits = self.model(batch["inputs"])
+            logits, class_logits = self.model(batch["inputs"], doy=batch["doy"], seq_len=batch["seq_lengths"])
             class_target = ground_truth[0].long().amax(dim=(1, 2)).reshape(-1)
             class_loss = self.loss_fn["class"](class_logits, class_target)
             alpha = get_alpha(self.current_epoch)
             loss += alpha * class_loss
             seg_weight = 1 - alpha
         else:
-            logits = self.model(batch["inputs"])
+            logits = self.model(batch["inputs"], doy=batch["doy"], seq_len=batch["seq_lengths"])
             seg_weight = 1
             class_loss = torch.tensor(0)
 
@@ -222,9 +225,10 @@ class ImgModule(LightningModule):
     def configure_optimizers(self) -> Dict[str, Any]:
         """Function to set-up the optimizer and scheduler"""
         trainable_params = get_trainable_params(
-            self.model, model_type=self.model_type, lr=self.lr, lr_ratio=self.lr_ratio, mode=self.lr_mode
+            self.model, model_type=self.model_type, lr=self.lr, lr_ratio=self.lr_ratio, mode=self.lr_mode,
+            weight_decay=self.weight_decay
         )
-        optimizer = torch.optim.AdamW(trainable_params, weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(trainable_params)
         scheduler = build_scheduler_pytorch(
             config=self.scheduler_config,
             optimizer=optimizer,

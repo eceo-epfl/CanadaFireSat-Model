@@ -4,6 +4,3 @@
 [submodule "external/ms_clip"]
 	path = external/ms_clip
 	url = https://github.com/hugoporta/MS-CLIP
-[submodule "external/ms_clip_fork"]
-	path = external/ms_clip_fork
-	url = https://github.com/louisgrosse/MS-CLIP-FORK

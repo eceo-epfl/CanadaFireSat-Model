@@ -47,7 +47,7 @@ def evaluate(cfg: DictConfig):
             model.model.out_H = cfg["MODEL"]["out_H"]
             model.model.out_W = cfg["MODEL"]["out_W"]
 
-        if "ViT" in model.model_type:
+        if "ViT" in model.model_type: # Here Potentially need to check for MSCLIP
             if model.model.features.patch_embed.img_size != (cfg["MODEL"]["img_res"], cfg["MODEL"]["img_res"]):
                 model.model.features.patch_embed.img_size = (cfg["MODEL"]["img_res"], cfg["MODEL"]["img_res"])
     else:
@@ -139,7 +139,8 @@ def evaluate(cfg: DictConfig):
             if cfg["mode"] == "image":
                 sample = data[0]
                 img_name_info = data[1]
-                logits = model(sample["inputs"].unsqueeze(0).to(device))
+                logits = model(sample["inputs"].unsqueeze(0).to(device), doy=sample["doy"].unsqueeze(0).to(device),
+                               seq_len=torch.tensor([sample["seq_lengths"]]).to(device)) # Here extend with seq_len and doy
             else:
 
                 if model.model_type in [

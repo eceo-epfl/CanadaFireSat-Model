@@ -5,11 +5,11 @@ from pytorch_lightning import LightningDataModule
 
 from src.constants import ENV_SOURCE_COLS, PREPROCESSING_SUFFIX, TAB_SOURCE_COLS
 from src.data.augmentations import MixHVFlip
-from src.data.Canada.data_transforms import (
-    Canada_segmentation_transform,
+from src.data.Canada.data_transforms_prev import (
     EnvCanada_segmentation_transform,
     TabCanada_segmentation_transform,
 )
+from src.data.Canada.data_transforms import build_pipeline
 from src.data.Canada.dataloader import get_dataloader
 from src.data.Canada.env_dataloader import get_dataloader as get_env_dataloader
 from src.data.Canada.mix_dataloader import get_dataloader as get_tab_dataloader
@@ -22,13 +22,19 @@ class SatDataModule(LightningDataModule):
     ):
         super().__init__()
 
+        trans_type = kwargs.pop("trans_type", "sits")
+        trans_config = {
+            "model_config": model_config,
+            **kwargs
+        }
+
         # Train key variables
         self.train_paths_file = train_config["paths"]
         self.train_batch_size = train_config["batch_size"]
         self.train_num_workers = train_config["num_workers"]
         self.train_root_dir = train_config["base_dir"]
         self.train_label_dir = train_config["label_dir"]
-        self.train_transform = Canada_segmentation_transform(model_config=model_config, is_training=True, **kwargs)
+        self.train_transform = build_pipeline(trans_type, config=trans_config, is_training=True)
         self.target_file_id = train_config["target_file_id"] if "target_file_id" in train_config else None
         self.fwi_th = (
             train_config["fwi_ths"][0] if ("fwi_ths" in train_config) and (0 in train_config["fwi_ths"]) else None
@@ -40,13 +46,11 @@ class SatDataModule(LightningDataModule):
         self.val_num_workers = eval_config["num_workers"]
         self.val_root_dir = eval_config["base_dir"]
         self.val_label_dir = eval_config["label_dir"]
-        self.val_transform = Canada_segmentation_transform(model_config=model_config, is_training=False, **kwargs)
+        self.val_transform = build_pipeline(trans_type, config=trans_config, is_training=False)
 
         self.suffix = PREPROCESSING_SUFFIX
         self.kwargs = kwargs
-        self.test_transform = Canada_segmentation_transform(
-            model_config=model_config, is_training=False, is_eval=True, **kwargs
-        )
+        self.test_transform = build_pipeline(trans_type, config=trans_config, is_training=False, is_eval=True)
 
     def __len__(self):
         return len(self.train_dataloader().dataset)
@@ -118,6 +122,12 @@ class TabSatDataModule(LightningDataModule):
     ):
         super().__init__()
 
+        trans_type = kwargs.pop("trans_type", "sits")
+        trans_config = {
+            "model_config": model_config,
+            **kwargs
+        }
+
         # Train key variables
         self.train_paths_file = train_config["paths"]
         self.train_batch_size = train_config["batch_size"]
@@ -126,18 +136,16 @@ class TabSatDataModule(LightningDataModule):
         self.train_label_dir = train_config["label_dir"]
         stats_dir = kwargs["tab_dir"][0]
         if "is_spatial" in kwargs and kwargs["is_spatial"]:
-            self.train_transform = Canada_segmentation_transform(
-                model_config=model_config, is_training=True, img_only=False, **kwargs
-            )
+            trans_config["img_only"] = False
+            self.train_transform = build_pipeline(trans_type, config=trans_config, is_training=True)
             self.tab_train_transform = EnvCanada_segmentation_transform(
                 model_config=model_config, stats_dir=stats_dir, is_training=True, env_only=False, **kwargs
             )
             self.mix_train_transform = MixHVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=kwargs["with_loc"])
             self.tab_train_cols = ENV_SOURCE_COLS
         else:
-            self.train_transform = Canada_segmentation_transform(
-                model_config=model_config, is_training=True, img_only=True, **kwargs
-            )
+            trans_config["img_only"] = True
+            self.train_transform = build_pipeline(trans_type, config=trans_config, is_training=True)
             self.tab_train_transform = TabCanada_segmentation_transform(
                 model_config=model_config, stats_dir=stats_dir, is_training=True, **kwargs
             )
@@ -155,27 +163,21 @@ class TabSatDataModule(LightningDataModule):
         self.val_root_dir = eval_config["base_dir"]
         self.val_label_dir = eval_config["label_dir"]
         if "is_spatial" in kwargs and kwargs["is_spatial"]:
-            self.val_transform = Canada_segmentation_transform(
-                model_config=model_config, is_training=False, img_only=False, **kwargs
-            )
+            self.val_transform = build_pipeline(trans_type, config=trans_config, is_training=False)
             self.tab_val_transform = EnvCanada_segmentation_transform(
                 model_config=model_config, stats_dir=stats_dir, is_training=False, env_only=False, **kwargs
             )
 
             self.tab_val_cols = ENV_SOURCE_COLS
         else:
-            self.val_transform = Canada_segmentation_transform(
-                model_config=model_config, is_training=False, img_only=True, **kwargs
-            )
+            self.val_transform = build_pipeline(trans_type, config=trans_config, is_training=False)
             self.tab_val_transform = TabCanada_segmentation_transform(
                 model_config=model_config, stats_dir=stats_dir, is_training=False, **kwargs
             )
             self.tab_val_cols = TAB_SOURCE_COLS
         self.suffix = PREPROCESSING_SUFFIX
         self.kwargs = kwargs
-        self.test_transform = Canada_segmentation_transform(
-            model_config=model_config, is_training=False, is_eval=True, **kwargs
-        )
+        self.test_transform = build_pipeline(trans_type, config=trans_config, is_training=False, is_eval=True)
 
     def __len__(self):
         return len(self.train_dataloader().dataset)

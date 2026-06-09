@@ -2,11 +2,11 @@ defaults:
   - _self_
   - global_config
 
-model_path: "./results/models/TEST_CLEAN_ViT_SITS_ONLY/ViTFacto-11-f1-0.50.ckpt" # Need to specify exact model path
+model_path: "./results/models/MIXLOSS_VPT_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt" # Need to specify exact model path
 config_name: "config_file.yaml"
 mode: "image"
 split: "test" # test
-output_dir: "./results/models/TEST_CLEAN_ViT_SITS_ONLY"
+output_dir: "./results/models/MIXLOSS_VPT_HIGHLR10X_MSCLIP_SITS_ONLY"
 seed: 42
 with_region: True
 fwi_ths: [5, 10, 20, 30]
@@ -15,53 +15,73 @@ size_plots: 6
 suffix: "one"
 
 MODEL:
-  architecture:  "ViTFacto"
-  vit_type: "dinov2_small"
+  architecture:  "MSClipFacto"
+  model_name: Llama3-MS-CLIP-Base
+  patch_size: 16
   pretrained: True
+  ds_labels: True
+  freeze_msclip: True
   input_img_res: 264
   img_res: 260
   train_max_seq_len: 5
+  # test_max_seq_len: 5
   val_max_seq_len: 5
-  input_dim: 14
-  patch_size: 14
+  input_dim: 10
   num_classes: 2
   out_H: 26
   out_W: 26
-  doy_int_type: "channel"
-  temp_enc_type: "convlstm"
-  kernel_size: [3, 3]
-  n_stack_layers: 1
   threshold: 0.5
-  flag_lora: True
-  rank_lora: 32
-  alpha_lora: 32.0
-  dropout_lora: 0.5
+  use_mixer: True
+  use_doy: True
+  use_cls_fusion: False
+  clearclip:
+    enabled: False
+    n_last: 1
+    keep_ffn: False        # should be false for ClearCLIP
+    keep_residual: False   # should be false for ClearCLIP
+    attn_variant: "qq"
+  vpt_config:
+    enabled: True
+    num_tokens: 20
+    total_d_layer: 11
 
 SOLVER:
   num_epochs: 20
   num_warmup_epochs: 2
-  loss_function: masked_dice_loss
+  loss_function: combined_dice_ce
 
 ### Leveraging RAW *.npy files ###
 DATASETS:
   kwargs:
-    mean_file: "${paths.bands_mean}"
-    std_file: "${paths.bands_std}"
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
     with_loc: False
     with_doy: True
-    # bands: possibility to specify the selected bands.
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
   train:
     paths: "${paths.split}"
     base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
     label_dir: "${paths.label}"
-    batch_size: 12
+    batch_size: 24
     num_workers: 8
 
   eval:
     paths: "${paths.split}"
     base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
     label_dir: "${paths.label}"
-    batch_size: 12
+    batch_size: 24
     num_workers: 8
     hard: False
 

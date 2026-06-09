@@ -1,342 +1,353 @@
-"""Functions to build the different transformation pipelines"""
+"""Transform pipeline registry — one config dict, one build call."""
+from functools import partial
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from torchvision import transforms
 
 from deepsat.data.PASTIS24.data_transforms import TileDates, UnkMask
-from src.constants import (
-    BANDS_ALL,
-    ENV_SOURCE_COLS,
-    LOW_SOURCE,
-    MID_SOURCE,
-    TAB_SOURCE_COLS,
-)
+from src.constants import BANDS_ALL, ENV_SOURCE_COLS, LOW_SOURCE, MID_SOURCE, MSCLIP_ORDER_10, S2_UINT_TO_REFLECTANCE, TAB_SOURCE_COLS
 from src.data.augmentations import (
-    Concat,
-    Crop,
-    CutOrPad,
-    DownSampleLab,
-    EnvConcat,
-    EnvNormalize,
-    EnvRescale,
-    EnvTileDates,
-    EnvToTensor,
-    EnvToTHWC,
-    GaussianNoise,
-    HVFlip,
-    Normalize,
-    Rescale,
-    ResizedCrop,
-    TabNormalize,
-    TabTileDates,
-    TabToTensor,
-    TileLocs,
-    ToTensor,
-    ToTHWC,
+    Concat, Crop, CutOrPad, DownSampleLab, EnvConcat, EnvNormalize,
+    EnvRescale, EnvTileDates, EnvToTensor, EnvToTHWC, GaussianNoise,
+    HVFlip, Normalize, ProcessDoy, ReorderBands, Rescale, ResizedCrop, TabNormalize, TabTileDates,
+    TabToTensor, TileLocs, ToTensor, ToTHWC,
 )
-from src.data.utils import extract_stats
+from src.data.utils import _extract_stats, _load_json_stats, _cutorpad
 
 
-# Test Extension with ColorJittering (RGB only), Coarse Dropout (Extend Masking), Mixup (Potentially in Dataset)
-def Canada_segmentation_transform(
-    model_config: Dict[str, Any],
-    mean_file: os.PathLike,
-    std_file: os.PathLike,
-    is_training: bool,
-    is_eval: bool = False,
-    bands: List[str] = BANDS_ALL,
-    with_doy: bool = True,
-    with_loc: bool = True,
-    img_only: bool = True,
-    **kwargs,
-) -> transforms.Compose:
-    """SITS augmentation pipeline
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
 
-    Args:
-        model_config (Dict[str, Any]): Config of the Model
-        mean_file (os.PathLike): File containing the mean of all bands
-        std_file (os.PathLike): File containing the std of all bands
-        is_training (bool): Flag if the pipeline is done for training
-        is_eval (bool, optional): Flag if the pipeline is done for final evaluation. Defaults to False.
-        bands (List[str], optional): Lists of Bands to include. Defaults to BANDS_ALL.
-        with_doy (bool, optional): Flag if we use day of the year. Defaults to True.
-        with_loc (bool, optional): Flag if we use the localization. Defaults to True.
-        img_only (bool, optional): Flag if we use SITS only. Defaults to True.
+_PIPELINE_REGISTRY: Dict[str, type] = {}
 
-    Returns:
-        transforms.Compose: Output tranformation pipeline
+def register_pipeline(name: str):
+    """Decorator to register a pipeline class under a given name."""
+    def decorator(cls):
+        if name in _PIPELINE_REGISTRY:
+            raise ValueError(f"Pipeline '{name}' is already registered.")
+        _PIPELINE_REGISTRY[name] = cls
+        return cls
+    return decorator
+
+def build_pipeline(name: str, config: Dict[str, Any], is_training: bool, is_eval: bool = False):
+    """Entry point: look up pipeline by name, instantiate with config, build."""
+    if name not in _PIPELINE_REGISTRY:
+        raise ValueError(
+            f"Unknown pipeline '{name}'. "
+            f"Available: {list(_PIPELINE_REGISTRY.keys())}"
+        )
+    return _PIPELINE_REGISTRY[name](config).build(is_training, is_eval)
+
+
+# ---------------------------------------------------------------------------
+# Base class
+# ---------------------------------------------------------------------------
+
+class TransformPipeline:
+    """
+    Base class for all pipelines. Subclasses receive the raw config dict
+    directly — no separate dataclass needed. Each subclass declares its
+    REQUIRED_KEYS and OPTIONAL_KEYS so misconfiguration is caught early.
+
+    Config keys are just plain strings, e.g.:
+        config = {
+            "model_config": {...},
+            "mean_file": "path/to/mean.npy",
+            "bands": ["B02", "B03", ...],
+        }
     """
 
-    # Extract the mean and std from the files
-    mean_array = extract_stats(mean_file, bands)
-    std_array = extract_stats(std_file, bands)
+    REQUIRED_KEYS: List[str] = []
+    OPTIONAL_KEYS: Dict[str, Any] = {}  # key -> default value
 
-    # Custom Bands Transforms
-    band_transform_list = [
-        ToTensor(with_loc=with_loc),
-        Rescale(output_size=(model_config["input_img_res"], model_config["input_img_res"])),
-        Concat(concat_keys=["10x", "20x", "60x"]),  # Order is important for RGB weights
-        Normalize(mean=mean_array, std=std_array),
-    ]
+    def __init__(self, config: Dict[str, Any]):
+        self._validate(config)
+        # Merge defaults for optional keys
+        self.config = {**self.OPTIONAL_KEYS, **config}
 
-    # Regularization Image Transforms
-    if is_training:
-        img_transform_list = [
-            Crop(
-                img_size=model_config["input_img_res"],
-                crop_size=model_config["img_res"],
-                random=True,
-                ground_truths=["labels"],
-                with_loc=with_loc,
-            ),
-            ResizedCrop(
-                out_size=model_config["img_res"],
-                scale=(0.9, 1.0),
-                prob=0.5,
-                ground_truths=["labels"],
-                with_loc=with_loc,
-            ),
-            DownSampleLab(out_H=model_config["out_H"], out_W=model_config["out_W"]),
-            HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=with_loc) if img_only else transforms.Lambda(lambda x: x),
+    def _validate(self, config: Dict[str, Any]):
+        missing = [k for k in self.REQUIRED_KEYS if k not in config]
+        if missing:
+            raise ValueError(f"{self.__class__.__name__} missing required config keys: {missing}")
+
+    def base_transforms(self) -> List:
+        return []
+
+    def train_transforms(self) -> List:
+        return []
+
+    def eval_transforms(self, is_eval: bool = False) -> List:
+        return []
+
+    def build(self, is_training: bool, is_eval: bool = False) -> transforms.Compose:
+        split_transforms = self.train_transforms() if is_training else self.eval_transforms(is_eval)
+        return transforms.Compose(self.base_transforms() + split_transforms)
+
+
+# ---------------------------------------------------------------------------
+# Pipelines
+# ---------------------------------------------------------------------------
+
+@register_pipeline("sits")
+class SITSTransformPipeline(TransformPipeline):
+
+    REQUIRED_KEYS = ["model_config", "mean_file", "std_file"]
+    OPTIONAL_KEYS = {
+        "bands": BANDS_ALL,
+        "with_doy": True,
+        "with_loc": True,
+        "img_only": True,
+        "eval_sampling": "start",
+    }
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        c = self.config
+        self.mean = _extract_stats(c["mean_file"], c["bands"])
+        self.std  = _extract_stats(c["std_file"],  c["bands"])
+        mc = c["model_config"]
+        self._img_res       = mc["img_res"]
+        self._input_img_res = mc["input_img_res"]
+        self._out_H         = mc["out_H"]
+        self._out_W         = mc["out_W"]
+        self._train_seq_len = mc.get("train_max_seq_len")
+        self._val_seq_len   = mc.get("val_max_seq_len")
+        self._test_seq_len  = mc.get("test_max_seq_len")
+
+    def base_transforms(self):
+        c = self.config
+        return [
+            ToTensor(with_loc=c["with_loc"]),
+            Rescale(output_size=(self._input_img_res, self._input_img_res)),
+            Concat(concat_keys=["10x", "20x", "60x"]),
+            Normalize(mean=self.mean, std=self.std),
+        ]
+
+    def train_transforms(self):
+        c = self.config
+        t = [
+            Crop(img_size=self._input_img_res, crop_size=self._img_res,
+                 random=True, ground_truths=["labels"], with_loc=c["with_loc"]),
+            ResizedCrop(out_size=self._img_res, scale=(0.9, 1.0), prob=0.5,
+                        ground_truths=["labels"], with_loc=c["with_loc"]),
+            DownSampleLab(out_H=self._out_H, out_W=self._out_W),
+            HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=c["with_loc"])
+            if c["img_only"] else transforms.Lambda(lambda x: x),
             GaussianNoise(var_limit=(0.01, 0.1), p=0.5),
         ]
+        if c["with_loc"]: t.append(TileLocs())
+        if c["with_doy"]: t.append(TileDates(H=self._img_res, W=self._img_res, doy_bins=None))
+        t += _cutorpad(self._train_seq_len, "random")
+        t += [UnkMask(unk_class=-999, ground_truth_target="labels"), ToTHWC()]
+        return t
 
-        if with_loc:
-            img_transform_list.append(TileLocs())
+    def eval_transforms(self, is_eval: bool = False):
+        c = self.config
+        t = [
+            Crop(img_size=self._input_img_res, crop_size=self._img_res,
+                 random=False, ground_truths=["labels"], with_loc=c["with_loc"]),
+            DownSampleLab(out_H=self._out_H, out_W=self._out_W),
+        ]
+        if c["with_loc"]: t.append(TileLocs())
+        if c["with_doy"]: t.append(TileDates(H=self._img_res, W=self._img_res, doy_bins=None))
+        seq_len = self._test_seq_len if is_eval else self._val_seq_len
+        t += _cutorpad(seq_len, c["eval_sampling"])
+        t += [UnkMask(unk_class=-999, ground_truth_target="labels"), ToTHWC()]
+        return t
 
-        if with_doy:
-            img_transform_list.append(TileDates(H=model_config["img_res"], W=model_config["img_res"], doy_bins=None))
 
-        img_transform_list.append(CutOrPad(max_seq_len=model_config["train_max_seq_len"], sampling_type="random"))
-        img_transform_list.append(UnkMask(unk_class=-999, ground_truth_target="labels"))
-        img_transform_list.append(ToTHWC())
+"""
+@register_pipeline("tab")
+class TabTransformPipeline(TransformPipeline):
 
-    else:
-        img_transform_list = [
-            Crop(
-                img_size=model_config["input_img_res"],
-                crop_size=model_config["img_res"],
-                random=False,
-                ground_truths=["labels"],
-                with_loc=with_loc,
-            ),
-            DownSampleLab(out_H=model_config["out_H"], out_W=model_config["out_W"]),
+    REQUIRED_KEYS = ["model_config", "stats_dir"]
+    OPTIONAL_KEYS = {
+        "tab_source_cols": TAB_SOURCE_COLS,
+        "with_doy": True,
+    }
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        c = self.config
+        mc = c["model_config"]
+        self._train_seq_len = mc.get("tab_train_max_seq_len")
+        self._val_seq_len   = mc.get("tab_val_max_seq_len")
+
+        means, stds = [], []
+        for source, cols in c["tab_source_cols"].items():
+            m, s = _load_json_stats(Path(c["stats_dir"]), source, cols, shape=(1, len(cols)))
+            means.append(m); stds.append(s)
+        self.mean = np.concatenate(means, axis=1)
+        self.std  = np.concatenate(stds,  axis=1)
+
+    def base_transforms(self):
+        t = [TabToTensor(), TabNormalize(mean=self.mean, std=self.std)]
+        if self.config["with_doy"]:
+            t.append(TabTileDates())
+        return t
+
+    def train_transforms(self):
+        return _cutorpad(self._train_seq_len, "random", mode="tab")
+
+    def eval_transforms(self):
+        return _cutorpad(self._val_seq_len, "start", mode="tab")
+
+
+@register_pipeline("env")
+class EnvTransformPipeline(TransformPipeline):
+
+    REQUIRED_KEYS = ["model_config", "stats_dir"]
+    OPTIONAL_KEYS = {
+        "tab_source_cols": ENV_SOURCE_COLS,
+        "with_doy": True,
+        "with_loc": False,
+        "env_only": False,
+    }
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        c = self.config
+        if c["with_loc"]:
+            raise NotImplementedError("Location information is not yet implemented for Environment Canada data.")
+
+        mc = c["model_config"]
+        self._mid_res       = mc["mid_input_res"]
+        self._low_res       = mc["low_input_res"]
+        self._out_H         = mc["out_H"]
+        self._out_W         = mc["out_W"]
+        self._train_seq_len = mc.get("env_train_max_seq_len")
+        self._val_seq_len   = mc.get("env_val_max_seq_len")
+
+        mid_means, mid_stds, low_means, low_stds = [], [], [], []
+        for source, cols in c["tab_source_cols"].items():
+            m, s = _load_json_stats(Path(c["stats_dir"]), source, cols, shape=(1, len(cols), 1, 1))
+            (mid_means if source in MID_SOURCE else low_means).append(m)
+            (mid_stds  if source in MID_SOURCE else low_stds ).append(s)
+
+        self.mid_mean = np.concatenate(mid_means, axis=1)
+        self.mid_std  = np.concatenate(mid_stds,  axis=1)
+        self.low_mean = np.concatenate(low_means, axis=1)
+        self.low_std  = np.concatenate(low_stds,  axis=1)
+
+    def _doy_transform(self):
+        return EnvTileDates(
+            mid_H=self._mid_res, mid_W=self._mid_res,
+            low_H=self._low_res, low_W=self._low_res,
+            doy_bins=None,
+        )
+
+    def base_transforms(self):
+        c = self.config
+        return [
+            EnvToTensor(with_loc=c["with_loc"]),
+            EnvRescale(mid_size=self._mid_res, low_size=self._low_res),
+            EnvConcat(mid_keys=MID_SOURCE, low_keys=LOW_SOURCE),
+            EnvNormalize(mid_mean=self.mid_mean, mid_std=self.mid_std,
+                         low_mean=self.low_mean, low_std=self.low_std),
+            DownSampleLab(out_H=self._out_H, out_W=self._out_W)
+            if c["env_only"] else transforms.Lambda(lambda x: x),
         ]
 
-        if with_loc:
-            img_transform_list.append(TileLocs())
+    def train_transforms(self):
+        c = self.config
+        t = [
+            HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=c["with_loc"])
+            if c["env_only"] else transforms.Lambda(lambda x: x),
+            GaussianNoise(var_limit=(0.01, 0.1), p=0.5),
+        ]
+        if c["with_doy"]: t.append(self._doy_transform())
+        t += _cutorpad(self._train_seq_len, "random", mode="env")
+        t.append(EnvToTHWC())
+        return t
 
-        if with_doy:
-            img_transform_list.append(TileDates(H=model_config["img_res"], W=model_config["img_res"], doy_bins=None))
+    def eval_transforms(self):
+        t = []
+        if self.config["with_doy"]: t.append(self._doy_transform())
+        t += _cutorpad(self._val_seq_len, "start", mode="env")
+        t.append(EnvToTHWC())
+        return t
+"""
 
-        if not is_eval:
-            img_transform_list.append(
-                CutOrPad(
-                    max_seq_len=model_config["val_max_seq_len"],
-                    sampling_type=kwargs["eval_sampling"] if "eval_sampling" in kwargs else "start",
-                )
-            )
+@register_pipeline("msclip")
+class MSCLIPTransformPipeline(TransformPipeline):
 
-        elif is_eval and "test_max_seq_len" in model_config:
-            img_transform_list.append(
-                CutOrPad(
-                    max_seq_len=model_config["test_max_seq_len"],
-                    sampling_type=kwargs["eval_sampling"] if "eval_sampling" in kwargs else "start",
-                )
-            )
+    REQUIRED_KEYS = ["model_config", "mean_file", "std_file"]
+    OPTIONAL_KEYS = {
+        "bands": BANDS_ALL,
+        "with_doy": True,
+        "with_loc": True,
+        "img_only": True,
+        "eval_sampling": "start",
+        "use_msclip_norm": True,
+    }
 
-        img_transform_list.append(UnkMask(unk_class=-999, ground_truth_target="labels"))
-        img_transform_list.append(ToTHWC())
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        c = self.config
+        self.mean = _extract_stats(c["mean_file"], c["bands"])
+        self.std  = _extract_stats(c["std_file"],  c["bands"])
+        mc = c["model_config"]
+        self._img_res       = mc["img_res"]
+        self._input_img_res = mc["input_img_res"]
+        self._out_H         = mc["out_H"]
+        self._out_W         = mc["out_W"]
+        self._train_seq_len = mc.get("train_max_seq_len")
+        self._val_seq_len   = mc.get("val_max_seq_len")
+        self._test_seq_len  = mc.get("test_max_seq_len")
 
-    total_transform_list = band_transform_list + img_transform_list
+    @staticmethod
+    def _multiply_inputs(sample, factor: float):
+        # sample is a dict; copy if you want to be safe
+        sample = dict(sample)
+        sample["inputs"] = sample["inputs"] * factor
+        return sample
 
-    return transforms.Compose(total_transform_list)
+    def base_transforms(self):
+        c = self.config
+        t =  [
+            ToTensor(with_loc=c["with_loc"]),
+            Rescale(output_size=(self._input_img_res, self._input_img_res)),
+            Concat(concat_keys=["10x", "20x", "60x"]),
+            ReorderBands(order=MSCLIP_ORDER_10),
+        ]
+        if c["use_msclip_norm"]: t.append(transforms.Lambda(partial(self._multiply_inputs, factor=S2_UINT_TO_REFLECTANCE)))
 
+        t.append(Normalize(mean=self.mean, std=self.std))
+        return t
 
+    def train_transforms(self):
+        c = self.config
+        t = [
+            Crop(img_size=self._input_img_res, crop_size=self._img_res,
+                 random=True, ground_truths=["labels"], with_loc=c["with_loc"]),
+            ResizedCrop(out_size=self._img_res, scale=(0.9, 1.0), prob=0.5,
+                        ground_truths=["labels"], with_loc=c["with_loc"]),
+            DownSampleLab(out_H=self._out_H, out_W=self._out_W),
+            HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=c["with_loc"])
+            if c["img_only"] else transforms.Lambda(lambda x: x), # Do we need this ?
+            # GaussianNoise(var_limit=(0.01, 0.1), p=0.5),
+        ]
+        if c["with_loc"]: t.append(TileLocs())
+        if c["with_doy"]: t.append(ProcessDoy(H=self._img_res, W=self._img_res, doy_bins=None, max_seq_len=None))
+        t += _cutorpad(self._train_seq_len, "random", flag_doy_process=c["with_doy"])
+        t += [UnkMask(unk_class=-999, ground_truth_target="labels")]
+        return t
 
-def TabCanada_segmentation_transform(
-    model_config: Dict[str, Any],
-    stats_dir: os.PathLike,
-    tab_source_cols: Dict[str, List[str]] = TAB_SOURCE_COLS,
-    with_doy: bool = True,
-    is_training=True,
-    **kwargs,
-) -> transforms.Compose:
-    """Tabular data augmentation pipeline
-
-    Args:
-        model_config (Dict[str, Any]): Config of the Model
-        stats_dir (os.PathLike): Directory containing mean and std files
-        tab_source_cols (Dict[str, List[str]], optional): Dictionary mapping sources to target variables. Defaults to TAB_SOURCE_COLS.
-        with_doy (bool, optional): Flag if we use day of the year. Defaults to True.
-        is_training (bool, optional): Flag if the pipeline is done for training. Defaults to True.
-
-    Returns:
-        transforms.Compose: Output tabular pipeline
-    """
-
-    tot_mean_ls = []
-    tot_std_ls = []
-
-    for source, cols in tab_source_cols.items():
-        with open(Path(stats_dir) / f"{source}_mean.json", "r") as f:
-            json_mean = json.load(f)
-
-        cols = sorted(cols)  # Ensure the order is the same as in the model
-
-        mean_array = np.array([json_mean[col] for col in cols]).reshape(1, len(cols)).astype(np.float32)  # Tab: N*C*S
-        tot_mean_ls.append(mean_array)
-
-        with open(Path(stats_dir) / f"{source}_std.json", "r") as f:
-            json_std = json.load(f)
-
-        std_array = np.array([json_std[col] for col in cols]).reshape(1, len(cols)).astype(np.float32)
-        tot_std_ls.append(std_array)
-
-    tot_mean_array = np.concatenate(tot_mean_ls, axis=1)
-    tot_std_array = np.concatenate(tot_std_ls, axis=1)
-
-    transform_list = []
-    transform_list.append(TabToTensor())  # data from numpy arrays to torch.float32
-    transform_list.append(TabNormalize(mean=tot_mean_array, std=tot_std_array))  # normalize all inputs individually
-
-    if with_doy:
-        transform_list.append(TabTileDates())  # tile day and year to shape Tx1
-
-    if is_training and "tab_train_max_seq_len" in model_config:
-        transform_list.append(
-            CutOrPad(max_seq_len=model_config["tab_train_max_seq_len"], sampling_type="random", mode="tab")
-        )
-    elif "tab_val_max_seq_len" in model_config:
-        transform_list.append(
-            CutOrPad(max_seq_len=model_config["tab_val_max_seq_len"], sampling_type="start", mode="tab")
-        )
-
-    return transforms.Compose(transform_list)
-
-
-def EnvCanada_segmentation_transform(
-    model_config: Dict[str, Any],
-    stats_dir: os.PathLike,
-    tab_source_cols: Dict[str, List[str]] = ENV_SOURCE_COLS,
-    with_doy: bool = True,
-    with_loc: bool = True,
-    env_only: bool = False,
-    is_training: bool = True,
-    **kwargs,
-) -> transforms.Compose:
-    """Environmental tiles data augmentation pipeline
-
-    Args:
-        model_config (Dict[str, Any]): Config of the Model
-        stats_dir (os.PathLike): Directory containing mean and std files
-        tab_source_cols (Dict[str, List[str]], optional): Dictionary mapping soources to target variables. Defaults to ENV_SOURCE_COLS.
-        with_doy (bool, optional): Flag if we use day of the year. Defaults to True.
-        with_loc (bool, optional): Flag if we use the localization. Defaults to True.
-        env_only (bool, optional): Flag if the pipeline is done for environmental data only. Defaults to False.
-        is_training (bool, optional): Flag if the pipeline is done for training. Defaults to True.
-
-    Returns:
-        transforms.Compose: Output environmental pipeline
-    """
-
-    tot_mean_ls = {}
-    tot_std_ls = {}
-
-    for source, cols in tab_source_cols.items():
-        with open(Path(stats_dir) / f"{source}_mean.json", "r") as f:
-            json_mean = json.load(f)
-
-        cols = sorted(cols)  # Ensure the order is the same as in the model
-
-        mean_array = (
-            np.array([json_mean[col] for col in cols]).reshape(1, len(cols), 1, 1).astype(np.float32)
-        )  # Env: N*C*H*W
-        tot_mean_ls[source] = mean_array
-
-        with open(Path(stats_dir) / f"{source}_std.json", "r") as f:
-            json_std = json.load(f)
-
-        std_array = np.array([json_std[col] for col in cols]).reshape(1, len(cols), 1, 1).astype(np.float32)
-        tot_std_ls[source] = std_array
-
-    mid_mean_array = np.concatenate([tot_mean_ls[source] for source in MID_SOURCE], axis=1)
-    low_mean_array = np.concatenate([tot_mean_ls[source] for source in LOW_SOURCE], axis=1)
-
-    mid_std_array = np.concatenate([tot_std_ls[source] for source in MID_SOURCE], axis=1)
-    low_std_array = np.concatenate([tot_std_ls[source] for source in LOW_SOURCE], axis=1)
-
-    transform_list = []
-    transform_list.append(EnvToTensor(with_loc=with_loc))  # data from numpy arrays to torch.float32
-    transform_list.append(EnvRescale(mid_size=model_config["mid_input_res"], low_size=model_config["low_input_res"]))
-    transform_list.append(EnvConcat(mid_keys=MID_SOURCE, low_keys=LOW_SOURCE))  # concat mid and low sources
-    transform_list.append(
-        EnvNormalize(mid_mean=mid_mean_array, mid_std=mid_std_array, low_mean=low_mean_array, low_std=low_std_array)
-    )  # normalize all inputs individually
-    transform_list.append(
-        DownSampleLab(out_H=model_config["out_H"], out_W=model_config["out_W"])
-        if env_only
-        else transforms.Lambda(lambda x: x)
-    )
-
-    if is_training:
-        transform_list.extend(
-            [
-                (
-                    HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=with_loc)
-                    if env_only
-                    else transforms.Lambda(lambda x: x)
-                ),
-                GaussianNoise(var_limit=(0.01, 0.1), p=0.5),
-            ]
-        )
-        if with_doy:
-            transform_list.append(
-                EnvTileDates(
-                    mid_H=model_config["mid_input_res"],
-                    mid_W=model_config["mid_input_res"],
-                    low_H=model_config["low_input_res"],
-                    low_W=model_config["low_input_res"],
-                    doy_bins=None,
-                )
-            )  # tile day and year to shape Tx1
-        if "env_train_max_seq_len" in model_config:
-            transform_list.append(
-                CutOrPad(max_seq_len=model_config["env_train_max_seq_len"], sampling_type="random", mode="env")
-            )
-
-    elif "env_val_max_seq_len" in model_config:
-        if with_doy:
-            transform_list.append(
-                EnvTileDates(
-                    mid_H=model_config["mid_input_res"],
-                    mid_W=model_config["mid_input_res"],
-                    low_H=model_config["low_input_res"],
-                    low_W=model_config["low_input_res"],
-                    doy_bins=None,
-                )
-            )  # tile day and year to shape Tx1
-        transform_list.append(
-            CutOrPad(max_seq_len=model_config["env_val_max_seq_len"], sampling_type="start", mode="env")
-        )
-    elif with_doy:
-        transform_list.append(
-            EnvTileDates(
-                mid_H=model_config["mid_input_res"],
-                mid_W=model_config["mid_input_res"],
-                low_H=model_config["low_input_res"],
-                low_W=model_config["low_input_res"],
-                doy_bins=None,
-            )
-        )  # tile day and year to shape Tx1
-
-    if with_loc:
-        raise NotImplementedError("Location information is not yet implemented for the Environment Canada data.")
-
-    transform_list.append(EnvToTHWC())
-
-    return transforms.Compose(transform_list)
+    def eval_transforms(self, is_eval: bool = False):
+        c = self.config
+        t = [
+            Crop(img_size=self._input_img_res, crop_size=self._img_res,
+                 random=False, ground_truths=["labels"], with_loc=c["with_loc"]),
+            DownSampleLab(out_H=self._out_H, out_W=self._out_W),
+        ]
+        if c["with_loc"]: t.append(TileLocs())
+        if c["with_doy"]: t.append(ProcessDoy(H=self._img_res, W=self._img_res, doy_bins=None, max_seq_len=None))
+        seq_len = self._test_seq_len if is_eval else self._val_seq_len
+        t += _cutorpad(seq_len, c["eval_sampling"], flag_doy_process=c["with_doy"])
+        t += [UnkMask(unk_class=-999, ground_truth_target="labels")]
+        return t

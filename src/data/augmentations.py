@@ -595,81 +595,82 @@ class EnvTileDates(object):
 class CutOrPad(object):
     """
     Pad series with zeros (matching series elements) to a max sequence length or cut sequential parts
-    items in  : inputs, *inputs_backward, labels
-    items out : inputs, *inputs_backward, labels, seq_lengths
+    items in  : inputs, labels
+    items out : inputs, labels, seq_lengths
     """
 
-    def __init__(self, max_seq_len: int, sampling_type: str, mode: str = "image"):
+    def __init__(self, max_seq_len: int, sampling_type: str, mode: str = "image", flag_doy_process: bool = False):
         assert isinstance(max_seq_len, (int, tuple))
         self.max_seq_len = max_seq_len
         self.sampling_type = sampling_type
         self.mode = mode
+        self.flag_doy_process = flag_doy_process
 
     def __call__(self, sample: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
 
         if self.mode == "image":
             seq_len = deepcopy(sample["inputs"].shape[0])
-            sample["inputs"] = self.pad_or_cut(sample["inputs"])
-            if "inputs_backward" in sample:
-                sample["inputs_backward"] = self.pad_or_cut(sample["inputs_backward"])
+            sample["inputs"], _, doy_tensor = self.pad_or_cut(sample["inputs"], doy_tensor=sample["doy"] if self.flag_doy_process else None)
+            if self.flag_doy_process:
+                sample["doy"] = doy_tensor
             if seq_len > self.max_seq_len:
                 seq_len = self.max_seq_len
             sample["seq_lengths"] = seq_len
         elif self.mode == "env":
-            sample["mid_inputs"], sample["mid_inputs_mask"] = self.pad_or_cut(
+            sample["mid_inputs"], sample["mid_inputs_mask"], _ = self.pad_or_cut(
                 sample["mid_inputs"], sample["mid_inputs_mask"]
             )
-            sample["low_inputs"], sample["low_inputs_mask"] = self.pad_or_cut(
+            sample["low_inputs"], sample["low_inputs_mask"], _ = self.pad_or_cut(
                 sample["low_inputs"], sample["low_inputs_mask"]
             )
         elif self.mode == "tab":
-            sample["tab_inputs"], sample["mask"] = self.pad_or_cut(sample["tab_inputs"], sample["mask"])
+            sample["tab_inputs"], sample["mask"], _ = self.pad_or_cut(sample["tab_inputs"], sample["mask"])
         else:
             raise ValueError("mode must be either 'image' or 'env'")
         return sample
 
-    def pad_or_cut(self, tensor: torch.Tensor, mask_tensor: torch.Tensor = None, dtype=torch.float32) -> Tuple[torch.Tensor]:
+    def pad_or_cut(self, tensor: torch.Tensor, mask_tensor: torch.Tensor = None, doy_tensor: torch.Tensor = None, dtype=torch.float32) -> Tuple[torch.Tensor]:
         """Pad or Cut the input tensor to the target size"""
         seq_len = tensor.shape[0]
         diff = self.max_seq_len - seq_len
         if diff > 0:
             tsize = list(tensor.shape)
-            if len(tsize) == 1:
-                pad_shape = [diff]
-            else:
-                pad_shape = [diff] + tsize[1:]
+            pad_shape = [diff] + tsize[1:]
+            doy_pad_shape = [diff] + list(doy_tensor.shape[1:]) if doy_tensor is not None else None
             tensor = torch.cat(
                 (tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0
             )
-            mask_tensor = (
-                torch.cat((mask_tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0)
-                if mask_tensor is not None
-                else None
-            )
+            doy_tensor = torch.cat(
+                (doy_tensor, torch.zeros(doy_pad_shape, dtype=dtype)), dim=0
+            ) if doy_tensor is not None else None
+
+            mask_tensor = torch.cat((mask_tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0
+                                    ) if mask_tensor is not None else None
+
         elif diff < 0:
             if self.sampling_type == "random":
                 random_idx = self.random_subseq(seq_len)
                 tensor = tensor[random_idx]
+                doy_tensor = doy_tensor[random_idx] if doy_tensor is not None else None
                 mask_tensor = mask_tensor[random_idx] if mask_tensor is not None else None
             elif self.sampling_type == "start":
                 tensor = tensor[-self.max_seq_len :]
+                doy_tensor = doy_tensor[-self.max_seq_len :] if doy_tensor is not None else None
                 mask_tensor = mask_tensor[-self.max_seq_len :] if mask_tensor is not None else None
             elif self.sampling_type == "uniform":
                 uni_idx = self.uniform_subseq(seq_len)
                 tensor = tensor[uni_idx]
+                doy_tensor = doy_tensor[uni_idx] if doy_tensor is not None else None
                 mask_tensor = mask_tensor[uni_idx] if mask_tensor is not None else None
             else:
                 start_idx = torch.randint(seq_len - self.max_seq_len, (1,))[0]
                 tensor = tensor[start_idx - self.max_seq_len + 1 : start_idx + 1]
+                doy_tensor = doy_tensor[start_idx - self.max_seq_len + 1 : start_idx + 1] if doy_tensor is not None else None
                 mask_tensor = (
                     mask_tensor[start_idx - self.max_seq_len + 1 : start_idx + 1] if mask_tensor is not None else None
                 )
 
-        if mask_tensor is None:
-            return tensor
-
-        else:
-            return tensor, mask_tensor
+        return tensor, mask_tensor, doy_tensor
 
     def random_subseq(self, seq_len: int):
         random_integers = torch.randperm(seq_len - 1)[: self.max_seq_len - 1].sort()[0]
@@ -705,4 +706,50 @@ class TileLocs(object):
         loc = loc.repeat(T, 1, 1, 1)
         sample["inputs"] = torch.cat((sample["inputs"], loc), dim=1)
         del sample["loc"]
+        return sample
+
+
+# ---------------------------------------------------------------------------
+# MS-CLIP Extensions
+# ---------------------------------------------------------------------------
+
+class ReorderBands(object):
+    def __init__(self, order):
+        self.order = order
+    def __call__(self, sample):
+        x = sample["inputs"]
+        if x.ndim == 3:
+            x = x[self.order, ...]
+        elif x.ndim == 4:
+            x = x[:, self.order, ...]
+        else:
+            raise ValueError(f"Unexpected shape {x.shape}")
+        sample["inputs"] = x
+        return sample
+
+
+class ProcessDoy(object):
+    def __init__(self, H, W, max_seq_len=None, doy_bins=None):
+        self.H = H
+        self.W = W
+        self.doy_bins = doy_bins
+        self.max_seq_len = max_seq_len
+
+    def __call__(self, sample):
+        doy = sample["doy"]  # [T] tensor
+        T = doy.shape[0]
+
+        # Cut or pad to fixed length
+        if self.max_seq_len is not None: # This seem not used
+            if T > self.max_seq_len:
+                doy = doy[:self.max_seq_len]
+            elif T < self.max_seq_len:
+                pad = torch.zeros(self.max_seq_len - T, dtype=doy.dtype)
+                doy = torch.cat([doy, pad], dim=0)
+
+        # Tile spatially: [T, H, W, 1]
+        doy = doy.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # [T,1,1,1]
+        doy = doy.repeat(1, self.H, self.W, 1)
+
+        sample["doy"] = doy
         return sample
