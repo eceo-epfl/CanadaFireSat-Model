@@ -2,7 +2,7 @@ import re
 import sys
 import os
 import glob
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from collections import Counter, defaultdict
 
 import hydra
@@ -198,117 +198,6 @@ def highlight_phrases_with_msclip(
     return out
 
 
-# ----------------------------------------------------------------------
-# Term vocab via spaCy NP candidates
-# ----------------------------------------------------------------------
-
-def DEPRECATED_build_term_vocab_spacy(
-    sentences: List[str],
-    model: Optional[nn.Module] = None,
-    tokenizer: Optional[nn.Module] = None,
-    min_freq: int = 5,
-    max_terms: Optional[int] = 100_000,
-    max_ngram: int = 3,
-    use_msclip: bool = False,
-    top_k_per_sentence: int = 1,
-    n_process: int = 1,
-) -> List[str]:
-    """
-    SpaCy-based term extraction.
-
-    If use_msclip=False (Idea 1):
-      - For each sentence, extract 1–3-gram spans of (NOUN/PROPN/ADJ)* ending in NOUN/PROPN.
-      - Filter with is_bad_label().
-      - Count all surviving spans globally.
-
-    If use_msclip=True (Idea 4):
-      - Same candidates.
-      - Use MS-CLIP to pick the top_k_per_sentence phrases most similar
-        to the full sentence embedding, and only count those.
-    """
-
-    print("processees : ", n_process)
-    print("[INFO] Loading spaCy model...")
-
-    nlp = spacy.load("en_core_web_sm", disable=["ner"])
-
-    counts: Counter = Counter()
-    print(f"[INFO] Extracting terms with spaCy (use_msclip={use_msclip})...")
-    # iterate sentences + docs together
-    for sent, doc in tqdm(
-        zip(sentences, nlp.pipe(sentences, batch_size=512, n_process=n_process)),
-        total=len(sentences),
-    ):
-
-        # 1) candidate spans: noun-headed 1..max_ngram-grams
-        content_toks = [
-            tok for tok in doc
-            if tok.is_alpha
-            and not tok.is_stop
-            and tok.pos_ in {"NOUN", "ADJ"}
-        ]
-
-        candidate_phrases: List[str] = []
-
-        for n in range(1, max_ngram + 1):
-            if n > max_ngram or len(content_toks) < n:
-                continue
-            for i in range(len(content_toks) - n + 1):
-                span = content_toks[i:i+n]
-                head = span[-1]
-
-                lemmas = [t.lemma_.lower() for t in span]
-                if len(set(lemmas)) != len(lemmas):
-                    continue
-
-                # require head to be noun/proper noun
-                if head.pos_ not in {"NOUN"}:
-                    continue
-
-                phrase = normalize_label_str(" ".join(t.lemma_ for t in span))
-                if is_bad_label(phrase):
-                    continue
-
-                # require at least one noun/proper noun inside
-                if not any(t.pos_ in {"NOUN"} for t in span):
-                    continue
-
-                candidate_phrases.append(phrase)
-
-        if not candidate_phrases:
-            continue
-
-        # 2) Count candidates
-        if use_msclip:
-            assert model is not None and tokenizer is not None, "model and tokenizer must be provided if use_msclip=True"
-            best_phrases = highlight_phrases_with_msclip(
-                sent,
-                candidate_phrases,
-                tokenizer=tokenizer,
-                model=model,
-                top_k=top_k_per_sentence,
-                ngram = max_ngram
-            )
-            for p in best_phrases:
-                counts[p] += 1
-        else:
-            for p in candidate_phrases:
-                counts[p] += 1
-
-    # 3) Frequency filtering + sorting
-    items = [(p, c) for p, c in counts.items() if c >= min_freq]
-    items.sort(key=lambda x: -x[1])  # highest freq first
-
-    if max_terms is not None and len(items) > max_terms:
-        print("CAREFULLLLLLLL Cropped list")
-        items = items[:max_terms]
-
-    terms = [p for p, c in items]
-    print(f"[INFO] Built spaCy term vocabulary of size {len(terms)} (min_freq={min_freq}).")
-    return terms
-
-
-
 def build_term_vocab_spacy(
     sentences: List[str],
     model: Optional[nn.Module] = None,
@@ -321,7 +210,7 @@ def build_term_vocab_spacy(
     n_process: int = 1,
     msclip_batch_size: int = 512,
     use_parser: bool = False,
-) -> List[str]:
+) -> Tuple[List[str], List[int]]:
 
     print(f"[INFO] Loading spaCy model (n_process={n_process})...")
     nlp = spacy.load("en_core_web_sm", disable=["ner"])
@@ -514,9 +403,10 @@ def build_term_vocab_spacy(
         items = items[:max_terms]
 
     terms = [p for p, _ in items]
+    freqs = [f for _, f in items]
     print(f"[INFO] Built spaCy term vocabulary of size {len(terms)} "
           f"(min_freq={min_freq}).")
-    return terms
+    return terms, freqs
 
 
 def _init_worker(
@@ -602,7 +492,7 @@ def keyphrase_extraction(
     top_k_per_sentence: int = 1,
     num_workers: Optional[int] = None,
     chunksize: int = 10,
-):
+) -> Tuple[List[str], List[int]]:
     """
     Multiprocessing implementation using imap_unordered.
     """
@@ -656,6 +546,7 @@ def keyphrase_extraction(
         items = items[:max_terms]
 
     terms = [phrase for phrase, _ in items]
+    freqs = [freq for _, freq in items]
 
     print(
         f"[INFO] Built PKE term vocabulary "
@@ -663,69 +554,7 @@ def keyphrase_extraction(
         f"(min_freq={min_freq})"
     )
 
-    return terms
-
-
-def DEPRECATED_keyphrase_extraction(
-        extractor_type: str,
-        sentences: List[str],
-        min_freq: int = 5,
-        max_terms: Optional[int] = 100_000,
-        max_ngram: int = 3,
-        top_k_per_sentence: int = 1,
-):
-    if extractor_type == "TopicRank":
-        extractor = pke.unsupervised.TopicRank()
-    elif extractor_type == "MultipartiteRank":
-        extractor = pke.unsupervised.MultipartiteRank()
-    elif extractor_type == "Yake":
-        extractor = pke.unsupervised.YAKE()
-    else:
-        raise ValueError(f"Unsupported extractor type: {extractor_type}")
-
-    print(f"[INFO] Loading Extractor {extractor_type}")
-    per_sentence: List[tuple] = []  # (sentence_str, [candidate_phrases])
-
-    for sent in tqdm(sentences, total=len(sentences)):
-        extractor.load_document(input=sent, language="en")
-
-        if extractor_type in {"TopicRank", "MultipartiteRank"}:
-            extractor.candidate_selection()
-        else:
-            extractor.candidate_selection(n=max_ngram)
-
-        extractor.candidate_weighting()
-        keyphrases = extractor.get_n_best(n=top_k_per_sentence)
-        if keyphrases:
-            candidate_phrases = []
-            for kp in keyphrases:
-                if len(kp[0].split()) > max_ngram:
-                    kp = (" ".join(kp[0].split()[len(kp[0].split()) - max_ngram:]), kp[1])
-
-                if not is_bad_label(kp[0]):
-                    candidate_phrases.append(normalize_label_str(kp[0]))
-
-            if not candidate_phrases:
-                continue
-
-            per_sentence.append((sent, candidate_phrases))
-
-    counts: Counter = Counter()
-    for _, candidates in per_sentence:
-        for p in candidates:
-            counts[p] += 1
-
-    items = [(p, c) for p, c in counts.items() if c >= min_freq]
-    items.sort(key=lambda x: -x[1])
-
-    if max_terms is not None and len(items) > max_terms:
-        print("CAREFULLLLLLLL Cropped list")
-        items = items[:max_terms]
-
-    terms = [p for p, _ in items]
-    print(f"[INFO] Built PKE term vocabulary of size {len(terms)} "
-          f"(min_freq={min_freq}).")
-    return terms
+    return terms, freqs
 
 
 @hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="extract_concept")
@@ -736,8 +565,8 @@ def extract_concepts(cfg: DictConfig):
         download_captions(cfg.captions_dir)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    captions_dir = cfg.captions_dir #"/home/hporta/code_project/wildfire-forecast/CanadaFireSat-Model/boreal_data/SSL4EO-captions"
-    dict_dir = cfg.dict_dir #"/home/hporta/code_project/wildfire-forecast/CanadaFireSat-Model/results/DictionnaryWordsGeneral"
+    captions_dir = cfg.captions_dir
+    dict_dir = cfg.dict_dir
     sentences = load_sentences_from_parquet(captions_dir)
 
     if cfg.use_msclip:
@@ -753,7 +582,7 @@ def extract_concepts(cfg: DictConfig):
     if cfg.method_type == "spacy":
 
         # --------- Build term vocabulary BEFORE k-means ----------
-        terms = build_term_vocab_spacy(
+        terms, freqs = build_term_vocab_spacy(
             sentences,
             model=msclip_model,
             tokenizer=tokenizer,
@@ -769,7 +598,7 @@ def extract_concepts(cfg: DictConfig):
         out_stub = "spacy" if not cfg.use_msclip else "spacy_msclip"
 
     elif cfg.method_type == "pke":
-        terms = keyphrase_extraction(
+        terms, freqs = keyphrase_extraction(
             extractor_type=cfg.pke_extractor,
             sentences=sentences,
             min_freq=cfg.min_freq,
@@ -779,17 +608,20 @@ def extract_concepts(cfg: DictConfig):
         )
         out_stub = f"pke_{cfg.pke_extractor.lower()}"
 
+    else:
+        raise NotImplementedError()
+
 
     # --------- Save dictionary ----------
     os.makedirs(dict_dir, exist_ok=True)
     out_path = os.path.join(dict_dir, f"{out_stub}_general_f{cfg.min_freq}k{cfg.top_k_per_sentence}n{cfg.max_ngram}max{cfg.max_terms}parser{cfg.use_parser}_homogeneous.csv")
 
     df = pd.DataFrame({
-        "concept": list(terms)
+        "concept": terms,
+        "frequency": freqs
     })
 
     df.to_csv(out_path, index=False)
-
     print(f"[INFO] Saved {len(terms)} concepts to {out_path}")
 
 if __name__ == "__main__":

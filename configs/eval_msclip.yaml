@@ -2,11 +2,11 @@ defaults:
   - _self_
   - global_config
 
-model_path: "./results/models/MIXLOSS_VPT_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt" # Need to specify exact model path
+model_path: "./results/models/MIXLOSS_VPT_HIGHLR100X_MSCLIP_SITS_ONLY/MSClipFacto-12-f1-0.51.ckpt" # Need to specify exact model path
 config_name: "config_file.yaml"
 mode: "image"
 split: "test" # test
-output_dir: "./results/models/MIXLOSS_VPT_HIGHLR10X_MSCLIP_SITS_ONLY"
+output_dir: "./results/models/MIXLOSS_VPT_HIGHLR100X_MSCLIP_SITS_ONLY"
 seed: 42
 with_region: True
 fwi_ths: [5, 10, 20, 30]
@@ -24,7 +24,7 @@ MODEL:
   input_img_res: 264
   img_res: 260
   train_max_seq_len: 5
-  # test_max_seq_len: 5
+  test_max_seq_len: 5
   val_max_seq_len: 5
   input_dim: 10
   num_classes: 2

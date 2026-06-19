@@ -2,6 +2,26 @@ defaults:
   - _self_
   - global_config
 
+
+concept_path: "./results/DictionnaryWordsGeneral/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous.csv"
+concept_ext: "freq"
+dict_size: 50000
+batch_size_text: 128
+threshold_patch: 0.2
+threshold_disc: 0.05
+babel_k_values: [2, 4, 8, 16]
+model_path: "./results/models/HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-19-f1-0.47.ckpt" # Need to specify exact model path
+config_name: "config_file.yaml"
+mode: "image"
+split: "val" # test
+output_dir: "./results/models/HIGHLR10X_MSCLIP_SITS_ONLY"
+seed: 42
+with_region: True
+fwi_ths: [5, 10, 20, 30]
+n_plots: 50
+size_plots: 6
+suffix: "one"
+
 MODEL:
   architecture:  "MSClipFacto"
   model_name: Llama3-MS-CLIP-Base
@@ -10,19 +30,18 @@ MODEL:
   ds_labels: True
   freeze_msclip: True
   input_img_res: 264
-  img_res: 256
+  img_res: 260
   train_max_seq_len: 5
+  # test_max_seq_len: 5
   val_max_seq_len: 5
   input_dim: 10
   num_classes: 2
-  out_H: 25
-  out_W: 25
+  out_H: 26
+  out_W: 26
   threshold: 0.5
   use_mixer: True
   use_doy: True
   use_cls_fusion: False
-  upscale_factor: 1
-  use_ln_norm_patch: False
   clearclip:
     enabled: False
     n_last: 1
@@ -30,24 +49,14 @@ MODEL:
     keep_residual: False   # should be false for ClearCLIP
     attn_variant: "qq"
   vpt_config:
-    enabled: True
+    enabled: False
     num_tokens: 20
     total_d_layer: 11
 
 SOLVER:
   num_epochs: 20
   num_warmup_epochs: 2
-  pos_weight: 6.7
-  loss_function: combined_dice_ce
-  lr_scheduler: 'cosine'
-  lr_base: 5e-4
-  lr_min: 1e-5
-  lr_start: 1e-5
-  num_cycles: 1
-  weight_decay: 0.01
-  accumulate_grad_batches: 2
-  interval: "epoch"
-  lr_mode: "msclip"
+  loss_function: masked_dice_loss
 
 ### Leveraging RAW *.npy files ###
 DATASETS:
@@ -82,8 +91,7 @@ DATASETS:
     label_dir: "${paths.label}"
     batch_size: 24
     num_workers: 8
-
-  test:
+    hard: False
 
 ### Leveraging Hf parquet files ###
 #DATASETS:
@@ -103,16 +111,4 @@ DATASETS:
 #    data_dir: "${paths.hf_data}"
 #    batch_size: 24
 #    num_workers: 8
-
-CHECKPOINT:
-  load_from_checkpoint:
-  experiment_name: "MIXLOSS_VPT_HIGHLR100X_MSCLIP_SITS_ONLY"
-  save_path: "./results/models"
-  train_metrics_steps: 200
-  save_steps: 10000
-  wandb_project: "${wandb.project}"
-  wandb_user: "${wandb.user}"
-
-SET-UP:
-  seed: 42
-  local_device_ids: [0]
+#    hard: False

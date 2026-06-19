@@ -77,6 +77,7 @@ segmentation-models-pytorch
 datasets
 spacy
 git+https://github.com/boudinfl/pke.git
+fastkmeans
 
 # FWI baseline
 rasterio

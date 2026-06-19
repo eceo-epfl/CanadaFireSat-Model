@@ -32,7 +32,6 @@ class VPTAdapter(nn.Module):
 
         self.prompt_proj    = nn.Linear(prompt_dim, prompt_dim)
         nn.init.kaiming_normal_(self.prompt_proj.weight, a=0, mode='fan_out')
-        self.prompt_norm    = nn.LayerNorm(prompt_dim, eps=1e-6)
         self.prompt_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -61,8 +60,6 @@ class VPTAdapter(nn.Module):
                 ], dim=1)
 
             x = self.resblocks[i](x)
-
-        x = self.prompt_norm(x)
 
         # Strip prompts: return [N, 1+P, D] — CLS + patches only
         return torch.cat([x[:, :1], x[:, 1 + self.num_tokens:]], dim=1)
