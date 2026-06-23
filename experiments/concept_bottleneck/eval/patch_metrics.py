@@ -88,12 +88,15 @@ def compute_text_patch_metrics(cfg: DictConfig):
         return torch.cat(embs, dim=0)  # [N, D]
 
     ### Concept Extraction Clustering vs Frequency Filtering
-    if cfg.concept_ext == "freq":
+    if cfg["concept_ext"] == "freq":
+        output_name = Path(cfg["concept_path"]).stem + f"_size{cfg['dict_size']}"
         concept_df = pd.read_csv(cfg["concept_path"]).sort_values("frequency", ascending=False)
         concept_list = concept_df["concept"].tolist()[:cfg["dict_size"]]
         concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
     else:
+        output_name = Path(cfg["concept_path"]).stem
         concept_embed = np.load(cfg["concept_path"]) # TODO: Potentially use the label here and not the centroid vector.
+        concept_embed = torch.from_numpy(concept_embed)
     n_concepts = concept_embed.shape[0] # Check if D here is 512 or 768 -> 512
 
     pairwise_sim_concept = concept_embed @ concept_embed.T
@@ -191,7 +194,6 @@ def compute_text_patch_metrics(cfg: DictConfig):
     avg_entropy_norm    = float(tot_image_entropy_norm.mean())
 
     ### Save .npy outputs
-    output_name = Path(cfg["concept_path"]).stem
     np.save(output_dir / f"{output_name}_max_similarities.npy",    tot_max_similarities)
     np.save(output_dir / f"{output_name}_target_discriminative.npy", disc)
 
@@ -210,7 +212,7 @@ def compute_text_patch_metrics(cfg: DictConfig):
             "25th percentile max similarity":   (quantile_25,        "lower quartile coverage"),
         },
         "Intra-Dictionary Redundancy": {
-            "Mutual coherence (mean max pairwise cosine)": (
+            "Mutual coherence (max max pairwise cosine)": (
                 coherence,
                 "lower is better, measures worst-case redundancy"
             ),

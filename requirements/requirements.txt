@@ -78,6 +78,7 @@ datasets
 spacy
 git+https://github.com/boudinfl/pke.git
 fastkmeans
+overcomplete
 
 # FWI baseline
 rasterio

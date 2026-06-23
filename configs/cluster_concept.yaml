@@ -3,7 +3,7 @@ defaults:
   - global_config
 
 
-concept_df_path: "./results/DictionnaryWordsGeneral/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous.csv"
+concept_df_path: "./results/DictionnaryWordsGeneral/spacy_msclip_general_f1k2n3max1500000parserFalse_homogeneous.csv"
 msclip_batch_size: 128
 n_cluster: 50000
 cluster_type: "torch"

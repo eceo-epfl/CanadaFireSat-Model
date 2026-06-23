@@ -3,9 +3,9 @@ defaults:
   - global_config
 
 
-concept_path: "./results/DictionnaryWordsGeneral/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous.csv"
-concept_ext: "freq"
-dict_size: 50000
+concept_path: "./results/DictionnaryWordsGeneral/spacy_general_f1k2n3max1500000parserTrue_homogeneous.csv"
+concept_ext:  "freq" # "cluster"
+dict_size: 30000
 batch_size_text: 128
 threshold_patch: 0.2
 threshold_disc: 0.05
@@ -42,6 +42,7 @@ MODEL:
   use_mixer: True
   use_doy: True
   use_cls_fusion: False
+  use_ln_norm_patch: False
   clearclip:
     enabled: False
     n_last: 1

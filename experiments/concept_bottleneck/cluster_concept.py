@@ -127,7 +127,7 @@ def compute_simplified_silhouette(
     cluster_labels: torch.Tensor,  # [n_atoms]
     chunk_size: int = 2000,
     device: str = "cuda",
-) -> Tuple[np.ndarray, dict]:
+) -> np.ndarray:
 
     dict_norm     = F.normalize(dict_emb, dim=-1).to(device)      # [n_atoms, D]
     centroid_norm = F.normalize(centroid_emb, dim=-1).to(device)  # [n_clusters, D]
@@ -208,13 +208,13 @@ def cluster_concept(cfg: DictConfig):
     closest_label_centroid, distances_rep = label_centroids_nearest(centroid_emb, dict_emb, dict_atom)
     freq_label_centroid = label_centroids_by_frequency(cluster_labels.numpy(), dict_atom,  dict_freq, cfg.n_cluster)
 
-    sil_score = compute_simplified_silhouette(dict_emb, centroid_emb, cluster_labels, chunk_size=100000) # TODO: Double check code and merge with label centroids.
+    sil_score = compute_simplified_silhouette(dict_emb, centroid_emb, cluster_labels, chunk_size=5000) # TODO: Double check code and merge with label centroids.
     # sil_score = 0
     dist_summary = {
-        "mean_distance_to_representative":   float(distances_rep.mean()),
-        "median_distance_to_representative": float(np.median(distances_rep)),
-        "std_distance_to_representative":    float(distances_rep.std()),
-        "silhouette_score": sil_score,
+        "mean_sim_to_representative":   float(distances_rep.mean()),
+        "median_sim_to_representative": float(np.median(distances_rep)),
+        "std_sim_to_representative":    float(distances_rep.std()),
+        "mean_silhouette_score": float(sil_score.mean()),
     }
     print("\n[METRIC] Distance to assigned cluster representative (cosine distance) & Silhouette:")
     for k, v in dist_summary.items():
