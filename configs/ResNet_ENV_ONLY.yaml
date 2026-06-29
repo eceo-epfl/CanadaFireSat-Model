@@ -46,6 +46,7 @@ SOLVER:
 ### Leveraging RAW *.npy files ###
 DATASETS:
   kwargs:
+    stats_dir: "${paths.pos_env_spa}"
     tab_dir: ["${paths.pos_env_spa}", "${paths.neg_env_spa}"]
     with_loc: False
     with_doy: True
@@ -70,6 +71,7 @@ DATASETS:
 #DATASETS:
 #  mode: "huggingface"
 #  kwargs:
+#    stats_dir: "${paths.hf_spa_stats_dir}"
 #    mean_file: "${paths.bands_mean}"
 #    std_file: "${paths.bands_std}"
 #    with_loc: False
