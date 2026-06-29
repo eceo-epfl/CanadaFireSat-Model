@@ -568,7 +568,7 @@ class MSClipTemporalCBM(nn.Module):
         return out
 
     @torch.no_grad()
-    def encode_patches(self, batch):
+    def encode_patches(self, batch, use_temp=False, doy=None, seq_len=None):
         """
         Extract per-time, per-patch MS-CLIP embeddings *before* temporal aggregation.
 
@@ -606,6 +606,46 @@ class MSClipTemporalCBM(nn.Module):
             pooled_feats = pooled_feats @ v.proj            # [B*T, 512]
         else:
             pooled_feats, patch_feats = self.msclip_model.image_encoder(x)
+
+        if use_temp:
+
+         if seq_len is None:
+            # If caller doesn't provide true sequence lengths, assume all timesteps are valid.
+            seq_len = torch.full((B,), T, device=batch.device, dtype=torch.long)
+
+            t_idx = torch.arange(T, device=batch.device).unsqueeze(0)      # [1,T]
+            valid_BT  = t_idx < seq_len.unsqueeze(1)                       # [B,T] True=valid
+            P = self.num_patches
+            valid_BPT = valid_BT.unsqueeze(1).expand(-1, P, -1)            # [B,P,T]
+            valid_mask = valid_BPT.reshape(B * P, T)                       # [B*P,T]
+
+            patch_feats = patch_feats.view(B, T, self.num_patches, self.mix_dim) \
+                                .permute(0, 2, 1, 3).contiguous() \
+                                .view(B * self.num_patches, T, self.mix_dim)          # [B*P, T, 768]
+
+            # DOY for mixer (768-d)
+            doy_mix = None
+            if self.use_doy and (doy is not None):
+                if doy.ndim > 2:
+                    doy = doy.view(B, T, -1)[:, :, 0]
+                assert doy.shape == (B, T), f"DOY must be [B,T], got {tuple(doy.shape)}"
+                d = self.doy_embed_mix(doy).unsqueeze(1).expand(-1, self.num_patches, -1, -1) \
+                                        .reshape(B * self.num_patches, T, self.mix_dim)
+                doy_mix = d
+
+            mix_out = self.temporal_mixer(patch_feats, doy_emb=doy_mix, mask = (~valid_mask))                    # [B*P, T, 768]
+
+            last_idx  = (seq_len - 1).clamp_min(0)                      # [B]
+            idx_bp    = last_idx.unsqueeze(1).expand(B, P).reshape(B*P) # [B*P]
+            row_ids   = torch.arange(B*P, device=mix_out.device)
+            last_768  = mix_out[row_ids, idx_bp, :]                     # [B*P,768]
+            last_768  = self.vision.ln_post(last_768) if self.use_ln_norm_patch else last_768
+            patch_vec = last_768 @ self.vision.proj                     # [B*P,512]
+
+            # [B*P, 512] -> [B, P, 512]
+            patch_feats = patch_vec.view(B, self.num_patches, self.embed_dim)
+
+            return patch_feats
 
         patch_feats = self.vision.ln_post(patch_feats) if self.use_ln_norm_patch else patch_feats                 # [B*T, P, 768]
         patch_feats = patch_feats @ self.vision.proj                    # [B*T, P, 512]

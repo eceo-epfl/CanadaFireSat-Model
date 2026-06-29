@@ -3,11 +3,12 @@ defaults:
   - global_config
 
 
-concept_path: "./results/DictionnaryWordsGeneral/spacy_general_f1k2n3max1500000parserTrue_homogeneous.csv"
-concept_ext:  "freq" # "cluster"
-dict_size: 30000
+concept_path: "./results/DictionnaryWordsGeneral/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_10000_centroids.npy"
+concept_ext:  "cluster" #"freq"
+dict_size: 10000
+use_temp: False
 batch_size_text: 128
-threshold_patch: 0.2
+threshold_patch: 0.2 # TODO: Potentially increase
 threshold_disc: 0.05
 babel_k_values: [2, 4, 8, 16]
 model_path: "./results/models/HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-19-f1-0.47.ckpt" # Need to specify exact model path

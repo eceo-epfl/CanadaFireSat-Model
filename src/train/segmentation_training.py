@@ -53,9 +53,11 @@ def train_and_evaluate(cfg: DictConfig):
         dirpath=save_path,
         filename=f"{arch_name}-" + "{epoch:02d}-f1-{fire_F1:.2f}",
         mode="max",
-        save_top_k=3,
+        save_top_k=1,
         auto_insert_metric_name=False,
     )
+
+    """
     checkpoint_callback_step = ModelCheckpoint(
         dirpath=save_path,
         filename=f"{arch_name}-" + "{epoch:02d}-step-{step:.2f}",
@@ -63,7 +65,9 @@ def train_and_evaluate(cfg: DictConfig):
         every_n_train_steps=save_steps,
         auto_insert_metric_name=False,
     )
-    callbacks = [checkpoint_callback_IoU, checkpoint_callback_step]
+    callbacks = [checkpoint_callback_IoU, checkpoint_callback_step]"""
+
+    callbacks = [checkpoint_callback_IoU]
     reload_dataloaders_every_n_epochs = 0
     if "pos_epochs" in cfg["DATASETS"]["train"]:
         switch_callback = SwitchAllCallback(config=cfg)

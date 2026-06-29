@@ -66,9 +66,13 @@ def compute_text_patch_metrics(cfg: DictConfig):
     spa_size = str(cfg["MODEL"]["img_res"]) if "img_res" in cfg["MODEL"] else str(cfg["MODEL"]["mid_input_res"])
 
     if cfg["DATASETS"]["eval"].get("hard"):
-        output_dir = Path(cfg["output_dir"]) / f"{cfg['split']}_temp_{temp_size}_spa_{spa_size}_hard"
+        output_dir = Path(cfg["output_dir"]) / f"{cfg['split']}_temp_{temp_size}_spa_{spa_size}_hard" / "keyword"
     else:
-        output_dir = Path(cfg["output_dir"]) / f"{cfg['split']}_temp_{temp_size}_spa_{spa_size}"
+        output_dir = Path(cfg["output_dir"]) / f"{cfg['split']}_temp_{temp_size}_spa_{spa_size}" / "keyword"
+
+    if cfg["use_temp"]:
+        output_dir = output_dir / "with_temp"
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ### Load the dataset
@@ -119,7 +123,8 @@ def compute_text_patch_metrics(cfg: DictConfig):
         with torch.no_grad():
             sample = data[0]
             # img_name_info = data[1]
-            patch_embed = model.model.encode_patches(sample["inputs"].unsqueeze(0).to(device)) # [1, T, P, D]
+            patch_embed = model.model.encode_patches(sample["inputs"].unsqueeze(0).to(device), use_temp=cfg["use_temp"],
+                                                     doy=sample["doy"].unsqueeze(0).to(device), seq_len=sample["seq_lengths"]) # [1, T, P, D]
             patch_embed = patch_embed.squeeze(0).cpu() # [T, P, D]
             patch_embed = F.normalize(patch_embed, dim=-1)
 

@@ -15,9 +15,9 @@ dict_dir: "/home/hporta/code_project/wildfire-forecast/CanadaFireSat-Model/resul
 method_type: "pke"
 min_freq: 1
 max_terms: 1500000
-max_ngram: 5
+max_ngram: 3
 use_msclip: False
 top_k_per_sentence: 2
 msclip_batch_size: 128
 use_parser: False
-pke_extractor: "MultipartiteRank"
+pke_extractor: "Yake"
