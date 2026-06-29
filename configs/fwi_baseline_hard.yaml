@@ -3,7 +3,7 @@ defaults:
   - global_config
 
 json_file: "${paths.split_hard}"
-root_dir: ["${paths.pos_sits}", ${paths.neg_sits_hard}"]
+root_dir: ["${paths.pos_sits}", "${paths.neg_sits_hard}"]
 label_dir: "${paths.label}"
 split: "test"
 horizon_type: "8-day Prediction"
