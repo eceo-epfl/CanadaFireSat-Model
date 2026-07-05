@@ -1,14 +1,16 @@
 # 🔥🛰️ CanadaFireSat Model
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)
+![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 [![Datasets on Hugging Face](https://img.shields.io/badge/HuggingFace-Dataset-orange?logo=huggingface)](https://huggingface.co/datasets/EPFL-ECEO/CanadaFireSat)
 
 This repository contains the code for training models on the benchmark CanadaFireSat available online. In this benchmark, we investigate the potential of deep learning with multiple sensors for high-resolution wildfire forecasting.
 
 - 💿 Dataset on [Hugging Face](https://huggingface.co/datasets/EPFL-ECEO/CanadaFireSat) <br>
-- 📝 Paper on [ArXiv](https://arxiv.org/abs/2506.08690) <br>
+- 📝 Published paper from [ISPRS](https://www.sciencedirect.com/science/article/pii/S0924271626002972) ([ArXiv Version](https://arxiv.org/abs/2506.08690))<br>
 - 📊 Data repository on [GitHub](https://github.com/eceo-epfl/CanadaFireSat-Data)
 - 🤖 Model Weights on [Hugging Face](https://huggingface.co/EPFL-ECEO)
+
+**Disclaimer:** [23/06/2026] This repository does not contain yet the models leveraging ignition proxy predictors used in Appendix E.
 
 **Summary Representation:**
 <p align="center">
@@ -96,10 +98,31 @@ Those models are trained across three data settings namely:
 
 ## 🛠️ Set-Up
 
-- ⚠️ For best compatibility, use Python 3.8.x .
-- In order to log the model training, you need to set-up a WandB profile or switch model loggers. You can specify your WandB information in `global_config.yaml`.
+- ⚠️ Support **Python 3.10** (tested with 3.10.6).
+- In order to log model training, you need to set up a Weights & Biases (W&B) account or switch to a different logger. You can specify your W&B credentials in `global_config.yaml`.
 
-- Then, you also need to install the Python virtual environment:
+### 1. Clone the repository
+
+Clone the repository **with its submodules**:
+
+```bash
+git clone --recurse-submodules https://github.com/eceo-epfl/CanadaFireSat-Model.git
+cd CanadaFireSat-Model
+```
+
+If you have already cloned the repository without submodules, initialize them with:
+
+```bash
+git submodule update --init --recursive
+```
+
+This will fetch the required `DeepSatModels` submodule located at:
+
+```
+deepsat/
+```
+
+### 2. Create the Python environment
 
 ```bash
 python -m venv fire-env
@@ -108,15 +131,21 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu117
 ```
 
-- You can then download the data from [Hugging Face 🤗](https://huggingface.co/datasets/EPFL-ECEO/CanadaFireSat) leveraging `src.huggingface.download` | Config: `download.yaml`.
+This repository was tested with CUDA 11.7. If you use a different CUDA version or CPU-only installation, install the appropriate PyTorch build before installing the remaining dependencies.
 
-- Specify the data paths in the `global_config.yaml`.
+### 3. Download the dataset
+
+Download the data from [Hugging Face 🤗](https://huggingface.co/datasets/EPFL-ECEO/CanadaFireSat) using `src.huggingface.download` with the configuration in `download.yaml`.
+
+### 4. Configure paths
+
+Specify the dataset and output paths in `global_config.yaml` before training.
 
 ## 🏋️ Model Training & Evaluation
 
 - **Training**: Run the `src.train.segmentation_training` script with your selected training config: `ResNet_MULTI.yaml`, `ViT_MULTI.yaml`, ...
 
-- **Evaluation**: Run the `src.eval.eval` script with your selected evaluation config: `eval.yaml`, `eval_tab.yaml`, ... . The model config described in the evaluation should matched the one of the its training config.
+- **Evaluation**: Run the `src.eval.eval` script with your selected evaluation config: `eval.yaml`, `eval_tab.yaml`, ... . The model config described in the evaluation should match the one used for training.
 
 ## 📷 Results
 
@@ -145,23 +174,23 @@ pip install -r requirements/requirements.txt --extra-index-url https://download.
       <td rowspan="3" style="border: 1px solid white;">ResNet-50</td>
       <td>SITS Only</td>
       <td>52.2</td>
-      <td><u>45.9</u></td><td><u>49.4</u></td>
-      <td><u>54.0</u></td><td><u>59.9</u></td>
-      <td><u>26.2</u></td><td><u>36.7</u></td>
-      <td><u>42.0</u></td><td><u>48.7</u></td>
+      <td><u>45.2</u></td><td><u>49.3</u></td>
+      <td><u>53.3</u></td><td><u>58.9</u></td>
+      <td><u>26.3</u></td><td><u>36.7</u></td>
+      <td><u>41.6</u></td><td><u>48.3</u></td>
     </tr>
     <tr>
       <td>ENV Only</td>
       <td>97.5</td>
       <td>41.6</td><td>46.7</td>
-      <td>50.8</td><td>55.2</td>
+      <td>49.9</td><td>53.5</td>
       <td>24.5</td><td>33.1</td>
-      <td>39.0</td><td>45.0</td>
+      <td>38.7</td><td>44.4</td>
     </tr>
     <tr style="border-bottom: 2px solid white;">
       <td>Multi-Modal</td>
       <td>52.2</td>
-      <td><b>46.1</b></td><td><b>51.2</b></td>
+      <td><b>46.1</b></td><td><b>51.1</b></td>
       <td><b>57.0</b></td><td><b>60.3</b></td>
       <td><b>27.1</b></td><td><b>37.4</b></td>
       <td><b>43.4</b></td><td><b>49.6</b></td>
@@ -187,9 +216,9 @@ pip install -r requirements/requirements.txt --extra-index-url https://download.
       <td>Multi-Modal</td>
       <td>37.7</td>
       <td><u>43.9</u></td><td><u>50.0</u></td>
-      <td><b>56.2</b></td><td><u>59.2</u></td>
-      <td><u>24.7</u></td><td><b>35.6</b></td>
-      <td><b>41.6</b></td><td><b>48.3</b></td>
+      <td><b>56.3</b></td><td><u>59.2</u></td>
+      <td><u>25.1</u></td><td><b>36.6</b></td>
+      <td><b>41.8</b></td><td><b>48.6</b></td>
     </tr>
     <tr>
       <td colspan="1" style="border: 1px solid white;">Baseline (FWI)</td>
@@ -200,9 +229,39 @@ pip install -r requirements/requirements.txt --extra-index-url https://download.
       <td>21.1</td><td>32.7</td>
       <td>28.1</td><td>38.6</td>
     </tr>
+    <tr>
+      <td colspan="1" style="border: 1px solid white;">Baseline (U-Net)¹</td>
+      <td>ENV Only</td>
+      <td>9.1</td>
+      <td>33.6</td><td>43.2</td>
+      <td>51.4</td><td>58.4</td>
+      <td>25.1</td><td>34.2</td>
+      <td>36.7</td><td>45.3</td>
+    </tr>
+    <tr>
+      <td colspan="1" style="border: 1px solid white;">Baseline (U-TAE)²</td>
+      <td>ENV Only</td>
+      <td>1.1</td>
+      <td>32.9</td><td>43.8</td>
+      <td>47.2</td><td>52.5</td>
+      <td>22.0</td><td>31.7</td>
+      <td>34.0</td><td>42.7</td>
+    </tr>
+    <tr>
+      <td colspan="1" style="border: 1px solid white;">Baseline (ConvLSTM)³</td>
+      <td>SITS Only</td>
+      <td>1.2</td>
+      <td>41.4</td><td>46.0</td>
+      <td>50.2</td><td>58.9</td>
+      <td>23.1</td><td>35.0</td>
+      <td>38.2</td><td>46.6</td>
+    </tr>
   </tbody>
 </table>
 
+¹ [Prapas et al., 2023](https://arxiv.org/abs/2306.10940) 
+² [Michail et al., 2025](https://arxiv.org/abs/2502.01550) 
+³ [Yang et al., 2021](https://arxiv.org/abs/2101.01975)
 
 **🗺️ Use Cases on large ROI:** We plot a large target area where a wildfire occurred in Québec in 2023, then the fire polygons corresponding to the wildfires, then our model predictions across the region.
 
@@ -232,11 +291,16 @@ pip install -r requirements/requirements.txt --extra-index-url https://download.
 
 ## 🖋️ Citation
 
+The paper has been published in the ISPRS Journal of Photogrammetry and Remote Sensing.
+
 ```
-@article{porta2025canadafiresat,
-  title={CanadaFireSat: Toward high-resolution wildfire forecasting with multiple modalities},
+@article{porta2026canadafiresat,
+  title={CanadaFireSat: Towards high-resolution wildfire forecasting with multiple modalities},
   author={Porta, Hugo and Dalsasso, Emanuele and McCarty, Jessica L and Tuia, Devis},
-  journal={arXiv preprint arXiv:2506.08690},
-  year={2025}
+  journal={ISPRS Journal of Photogrammetry and Remote Sensing},
+  volume={239},
+  pages={555--572},
+  year={2026},
+  publisher={Elsevier}
 }
 ```
