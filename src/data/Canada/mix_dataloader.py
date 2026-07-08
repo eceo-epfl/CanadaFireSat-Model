@@ -42,7 +42,7 @@ def get_dataloader(
     mix_transform: transforms.Compose = None,
     split: str = "train",
     bands: List[str] = BANDS_ALL,
-    suffix: str ="one",
+    suffix: str = "one",
     fast: bool = True,
     tab_source_cols: Dict[str, List[str]] = TAB_SOURCE_COLS,
     nan_value: float = 0.0,
@@ -308,7 +308,6 @@ class SatImTabDataset(Dataset):
             return sample, tab_sample, img_name_info
 
         return sample, tab_sample
-
 
     def __adapt__(self, idx) -> Tuple[Dict[str, np.ndarray], str]:
         raise NotImplementedError("This method is not supported yet")

@@ -1,0 +1,89 @@
+defaults:
+  - _self_
+  - global_config
+
+MODEL:
+  architecture:  "UNet"
+  encoder: "efficientnet-b1"
+  mid_input_res: 32
+  low_input_res: 32 # Placeholder
+  era_ratio: 22.264
+  input_dim: 15
+  num_classes: 2
+  out_H: 24
+  out_W: 24
+  threshold: 0.5
+
+SOLVER:
+  num_epochs: 20
+  num_warmup_epochs: 2
+  pos_weight: 6.7
+  loss_function:  combined_dice_ce
+  lr_scheduler: 'cosine'
+  lr_base: 5e-6
+  lr_min: 1e-7
+  lr_start: 1e-7
+  num_cycles: 1
+  weight_decay: 0.01
+  accumulate_grad_batches: 1
+  interval: "epoch"
+
+### Leveraging RAW *.npy files ###
+DATASETS:
+  kwargs:
+    stats_dir: "${paths.pos_env_spa}"
+    tab_dir: ["${paths.pos_env_spa}", "${paths.neg_env_spa}"]
+    with_loc: False
+    with_doy: True
+    is_spatial: True
+    nan_value: "median"
+    is_temp: True
+    # bands: possibility to specify the selected bands.
+  train:
+    paths: "${paths.split}"
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+
+  eval:
+    paths: "${paths.split}"
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+
+  test:
+
+### Leveraging Hf parquet files ###
+#DATASETS:
+#  mode: "huggingface"
+#  kwargs:
+#    stats_dir: "${paths.hf_spa_stats_dir}"
+#    mean_file: "${paths.bands_mean}"
+#    std_file: "${paths.bands_std}"
+#    with_loc: False
+#    with_doy: True
+#    is_spatial: True
+#    nan_value: "median"
+    # bands: possibility to specify the selected bands.
+#  train:
+#    data_dir: "${paths.hf_data}"
+#    batch_size: 24
+#    num_workers: 8
+#
+#  eval:
+#    data_dir: "${paths.hf_data}"
+#    batch_size: 24
+#    num_workers: 8
+
+CHECKPOINT:
+  load_from_checkpoint:
+  experiment_name: 'UNet_ENV_ONLY'
+  save_path: './results/models'
+  train_metrics_steps: 200
+  save_steps: 10000
+  wandb_project: "${wandb.project}"
+  wandb_user: "${wandb.user}"
+
+SET-UP:
+  seed: 42
+  local_device_ids: [0]

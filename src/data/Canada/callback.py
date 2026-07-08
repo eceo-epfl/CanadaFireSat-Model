@@ -1,4 +1,5 @@
 """Callback classes for specific sampling strategy during training"""
+
 import copy
 from typing import Any, Dict
 
@@ -10,6 +11,7 @@ from deepsat.metrics.loss_functions import get_loss
 
 class SwitchAllCallback(Callback):
     """Callback to change from only using Positive to All samples"""
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         train_config = config["DATASETS"]["train"]
@@ -22,6 +24,7 @@ class SwitchAllCallback(Callback):
 
 class FWICallback(Callback):
     """Callback to change the FWI bucket for selecting samples"""
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.fwi_ths = config["DATASETS"]["train"]["fwi_ths"]
@@ -33,6 +36,7 @@ class FWICallback(Callback):
 
 class WeightLossCallback(Callback):
     """Callback to change from classification loss to segmentation"""
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.weights = config["SOLVER"]["weights"]

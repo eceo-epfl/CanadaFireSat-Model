@@ -12,6 +12,8 @@ from deepsat.metrics.loss_functions import get_loss
 from deepsat.metrics.numpy_metrics import get_classification_metrics
 from deepsat.metrics.torch_metrics import get_binary_metrics, get_mean_metrics
 from deepsat.utils.lr_scheduler import build_scheduler_pytorch
+from src.baseline.seas_unet import UNet
+from src.baseline.seas_utae import UTAEWrap
 from src.data.utils import segmentation_ground_truths
 from src.eval.utils import get_pr_auc_scores
 from src.models.convlstm import TabConvLSTMNet
@@ -68,6 +70,10 @@ class TabModule(LightningModule):
             return MultiViTFactorizeModel(**model_config)
         if model_config["architecture"] == "EnvViTFactorizeModel":
             return EnvViTFactorizeModel(**model_config)
+        elif model_config["architecture"] == "UNet":
+            return UNet(**model_config)
+        elif model_config["architecture"] == "UTAE":
+            return UTAEWrap(**model_config)
         raise NameError(f"Model architecture {model_config['architecture']} not found")
 
     def forward(
@@ -91,7 +97,7 @@ class TabModule(LightningModule):
         ]:
             return self.model(x, xtab, masktab)
 
-        if self.model_type in ["EnvResNet", "EnvViTFactorizeModel"]:
+        if self.model_type in ["EnvResNet", "EnvViTFactorizeModel", "UNet", "UTAE"]:
             return self.model(xmid, xlow, m_mid, m_low)
 
         return self.model(x, xmid, xlow, m_mid, m_low)
@@ -110,7 +116,7 @@ class TabModule(LightningModule):
             "MultiViTFactorizeModel",
         ]:
             outputs = self.model(batch[0]["inputs"], batch[1]["tab_inputs"], batch[1]["mask"])
-        elif self.model_type in ["EnvResNet", "EnvViTFactorizeModel"]:
+        elif self.model_type in ["EnvResNet", "EnvViTFactorizeModel", "UNet", "UTAE"]:
             outputs = self.model(
                 batch["mid_inputs"], batch["low_inputs"], batch["mid_inputs_mask"], batch["low_inputs_mask"]
             )
@@ -166,7 +172,7 @@ class TabModule(LightningModule):
             "MultiViTFactorizeModel",
         ]:
             logits = self.model(batch[0]["inputs"], batch[1]["tab_inputs"], batch[1]["mask"])
-        elif self.model_type in ["EnvResNet", "EnvViTFactorizeModel"]:
+        elif self.model_type in ["EnvResNet", "EnvViTFactorizeModel", "UNet", "UTAE"]:
             logits = self.model(
                 batch["mid_inputs"], batch["low_inputs"], batch["mid_inputs_mask"], batch["low_inputs_mask"]
             )

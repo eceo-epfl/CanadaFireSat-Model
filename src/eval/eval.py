@@ -1,4 +1,5 @@
 """Evaluation Script for Validation, Test, and Test Hard"""
+
 from pathlib import Path
 
 import hydra
@@ -62,7 +63,7 @@ def evaluate(cfg: DictConfig):
             print("Unexpected keys:", un_keys)
 
         # Test different image sizes
-        if model.model_type in ["TabTSViT", "TabConvLSTM"]:
+        if model.model_type in ["TabTSViT", "TabConvLSTM", "UNet", "UTAE"]:
 
             if cfg["MODEL"]["out_H"] != model.model.out_H or cfg["MODEL"]["out_W"] != model.model.out_W:
                 model.model.out_H = cfg["MODEL"]["out_H"]
@@ -159,7 +160,7 @@ def evaluate(cfg: DictConfig):
                         tab_sample["mask"].unsqueeze(0).to(device),
                     )
 
-                elif model.model_type in ["EnvResNet", "EnvViTFactorizeModel"]:
+                elif model.model_type in ["EnvResNet", "EnvViTFactorizeModel", "UNet", "UTAE"]:
 
                     sample = data[0]
                     img_name_info = data[1]

@@ -1,7 +1,8 @@
 """Library of Samplers for specific training curriculum strategy"""
+
 import random
 
-from torch.utils.data import Sampler, Dataset
+from torch.utils.data import Dataset, Sampler
 
 
 class FileIDSampler(Sampler):

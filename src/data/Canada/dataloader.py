@@ -48,7 +48,7 @@ def get_dataloader(
     fwi_th: float = None,
     with_loc: bool = False,
     **kwargs,
-) -> torch.utils.data.DataLoader :
+) -> torch.utils.data.DataLoader:
     """Get Dataloader for SITS only.
 
     Args:
@@ -238,7 +238,6 @@ class SatImDataset(Dataset):
             return sample, img_name_info
 
         return sample
-
 
     def __adapt__(self, idx) -> Tuple[Dict[str, np.ndarray], str]:
         raise NotImplementedError("Adapt method not implemented yet")

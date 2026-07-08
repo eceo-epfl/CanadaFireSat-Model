@@ -30,7 +30,6 @@ from src.constants import (
 
 def get_dataloader(
     paths_file: Union[str, List[str]],
-    root_dir: Union[str, List[str]],
     tab_dir: Union[str, List[str]],
     label_dir: str,
     tab_transform: transforms.Compose = None,
@@ -47,13 +46,13 @@ def get_dataloader(
     fwi_th: float = None,
     with_loc: bool = False,
     is_spatial: bool = False,
+    is_temp: bool = True,
     **kwargs,
 ):
     """Get Dataloader for ENV only.
 
     Args:
         paths_file (Union[str, List[str]]): Path of the file(s) listing the samples
-        root_dir (Union[str, List[str]]): Root directories of the SITS
         tab_dir (Union[str, List[str]]): Directories of the environmental inputs
         label_dir (str): Directory of the positive samples: binary labels
         tab_transform (transforms.Compose, optional): Data augmentation pipeline. Defaults to None.
@@ -70,7 +69,7 @@ def get_dataloader(
         fwi_th (float, optional): FWI threshild for sampling specific fire risk. Defaults to None.
         with_loc (bool, optional): Flag to use localization. Defaults to False.
         is_spatial (bool, optional): Flag to use spatial inputs. Defaults to False.
-
+        is_temp (bool, optional): Flag to use temporal inputs. Defaults to True.
     Returns:
         torch.utils.data.DataLoader: ENV Dataloader
     """
@@ -78,7 +77,6 @@ def get_dataloader(
     dataset = EnvDataset(
         json_file=paths_file,
         tab_dir=tab_dir,
-        root_dir=root_dir,
         label_dir=label_dir,
         tab_transform=tab_transform,
         split=split,
@@ -88,6 +86,7 @@ def get_dataloader(
         nan_value=nan_value,
         with_loc=with_loc,
         is_spatial=is_spatial,
+        is_temp=is_temp,
     )
 
     if target_file_id is not None:
@@ -147,7 +146,6 @@ class EnvDataset(Dataset):
     def __init__(
         self,
         json_file: Union[str, List[str]],
-        root_dir: Union[str, List[str]],
         tab_dir: Union[str, List[str]],
         label_dir: str,
         tab_transform: Optional[transforms.Compose] = None,
@@ -158,12 +156,12 @@ class EnvDataset(Dataset):
         tab_source_cols: Dict[str, List[str]] = TAB_SOURCE_COLS,
         is_spatial: bool = False,
         nan_value: Union[str, float] = 0.0,
+        is_temp: bool = True,
     ):
         """Initialize the Dataset
 
         Args:
             json_file (Union[str, List[str]]): Path of the file(s) listing the samples
-            root_dir (Union[str, List[str]]): Root directories of the SITS (DEPRECATED)
             tab_dir (Union[str, List[str]]): Directories of the environmental inputs
             label_dir (str): Directory of the positive samples: binary labels
             tab_transform (Optional[transforms.Compose], optional): Data augmentation pipeline. Defaults to None.
@@ -174,6 +172,7 @@ class EnvDataset(Dataset):
             tab_source_cols (Dict[str, List[str]], optional): Dictionary mapping sources to target variables. Defaults to TAB_SOURCE_COLS.
             is_spatial (bool, optional): Flag to use spatial inputs. Defaults to False.
             nan_value (Union[str, float], optional): Value to fill missing entries. Defaults to 0.0.
+            is_temp (bool, optional): Flag to use temporal inputs. Defaults to True.
 
         Raises:
             NotImplementedError: Does not support multiple split files
@@ -208,6 +207,7 @@ class EnvDataset(Dataset):
         self.tab_source_cols = tab_source_cols
         self.nan_value = nan_value
         self.is_spatial = is_spatial
+        self.is_temp = is_temp
 
     def __len__(self):
         return len(self.data_paths)
@@ -280,6 +280,8 @@ class EnvDataset(Dataset):
                 idx = [cols_id.index(col) for col in cols]
                 tab_data = np.load(os.path.join(ts_path, f"{source}.npy"))[idx]  # Input: C, H, W, T
                 tab_data = np.moveaxis(tab_data, -1, 0)  # T, C, H, W
+                if self.is_temp:
+                    tab_data = tab_data[-1:]  # Remove the last date for temporal models
                 tab_data, tab_mask = process_nan(tab_data, self.nan_value)
                 env_sample[source] = tab_data
                 env_sample[f"{source}_mask"] = tab_mask
@@ -291,7 +293,9 @@ class EnvDataset(Dataset):
             tab_doy_ts = np.load(os.path.join(ts_path, "dates.npy"), allow_pickle=True)  # Input: (T,) with T == 8
             assert np.all(tab_doy_ts[:-1] <= tab_doy_ts[1:]), "Environmental data is not in temporal order"
             tab_doy_ts = np.array([dt.timetuple().tm_yday for dt in tab_doy_ts])
-            env_sample["tab_doy"] = tab_doy_ts
+            env_sample["tab_doy"] = (
+                tab_doy_ts if not self.is_temp else tab_doy_ts[-1:]
+            )  # Remove the last date for temporal models
             env_sample["labels"] = labels
 
         if self.with_loc:

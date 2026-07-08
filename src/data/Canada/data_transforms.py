@@ -1,4 +1,5 @@
 """Functions to build the different transformation pipelines"""
+
 import json
 import os
 from pathlib import Path
@@ -21,8 +22,10 @@ from src.data.augmentations import (
     CutOrPad,
     DownSampleLab,
     EnvConcat,
+    EnvConcatBaseline,
     EnvNormalize,
     EnvRescale,
+    EnvRescaleBaseline,
     EnvTileDates,
     EnvToTensor,
     EnvToTHWC,
@@ -157,7 +160,6 @@ def Canada_segmentation_transform(
     return transforms.Compose(total_transform_list)
 
 
-
 def TabCanada_segmentation_transform(
     model_config: Dict[str, Any],
     stats_dir: os.PathLike,
@@ -274,6 +276,131 @@ def EnvCanada_segmentation_transform(
     transform_list.append(EnvToTensor(with_loc=with_loc))  # data from numpy arrays to torch.float32
     transform_list.append(EnvRescale(mid_size=model_config["mid_input_res"], low_size=model_config["low_input_res"]))
     transform_list.append(EnvConcat(mid_keys=MID_SOURCE, low_keys=LOW_SOURCE))  # concat mid and low sources
+    transform_list.append(
+        EnvNormalize(mid_mean=mid_mean_array, mid_std=mid_std_array, low_mean=low_mean_array, low_std=low_std_array)
+    )  # normalize all inputs individually
+    transform_list.append(
+        DownSampleLab(out_H=model_config["out_H"], out_W=model_config["out_W"])
+        if env_only
+        else transforms.Lambda(lambda x: x)
+    )
+
+    if is_training:
+        transform_list.extend(
+            [
+                (
+                    HVFlip(hflip_prob=0.5, vflip_prob=0.5, with_loc=with_loc)
+                    if env_only
+                    else transforms.Lambda(lambda x: x)
+                ),
+                GaussianNoise(var_limit=(0.01, 0.1), p=0.5),
+            ]
+        )
+        if with_doy:
+            transform_list.append(
+                EnvTileDates(
+                    mid_H=model_config["mid_input_res"],
+                    mid_W=model_config["mid_input_res"],
+                    low_H=model_config["low_input_res"],
+                    low_W=model_config["low_input_res"],
+                    doy_bins=None,
+                )
+            )  # tile day and year to shape Tx1
+        if "env_train_max_seq_len" in model_config:
+            transform_list.append(
+                CutOrPad(max_seq_len=model_config["env_train_max_seq_len"], sampling_type="random", mode="env")
+            )
+
+    elif "env_val_max_seq_len" in model_config:
+        if with_doy:
+            transform_list.append(
+                EnvTileDates(
+                    mid_H=model_config["mid_input_res"],
+                    mid_W=model_config["mid_input_res"],
+                    low_H=model_config["low_input_res"],
+                    low_W=model_config["low_input_res"],
+                    doy_bins=None,
+                )
+            )  # tile day and year to shape Tx1
+        transform_list.append(
+            CutOrPad(max_seq_len=model_config["env_val_max_seq_len"], sampling_type="start", mode="env")
+        )
+    elif with_doy:
+        transform_list.append(
+            EnvTileDates(
+                mid_H=model_config["mid_input_res"],
+                mid_W=model_config["mid_input_res"],
+                low_H=model_config["low_input_res"],
+                low_W=model_config["low_input_res"],
+                doy_bins=None,
+            )
+        )  # tile day and year to shape Tx1
+
+    if with_loc:
+        raise NotImplementedError("Location information is not yet implemented for the Environment Canada data.")
+
+    transform_list.append(EnvToTHWC())
+
+    return transforms.Compose(transform_list)
+
+
+def EnvBaselineCanada_segmentation_transform(
+    model_config: Dict[str, Any],
+    stats_dir: os.PathLike,
+    tab_source_cols: Dict[str, List[str]] = ENV_SOURCE_COLS,
+    with_doy: bool = True,
+    with_loc: bool = True,
+    env_only: bool = False,
+    is_training: bool = True,
+    **kwargs,
+) -> transforms.Compose:
+    """Environmental tiles data augmentation pipeline
+
+    Adaptation for the U-Net and U-TAE Baseline models, which do not use the low-resolution sources.
+
+    Args:
+        model_config (Dict[str, Any]): Config of the Model
+        stats_dir (os.PathLike): Directory containing mean and std files
+        tab_source_cols (Dict[str, List[str]], optional): Dictionary mapping soources to target variables. Defaults to ENV_SOURCE_COLS.
+        with_doy (bool, optional): Flag if we use day of the year. Defaults to True.
+        with_loc (bool, optional): Flag if we use the localization. Defaults to True.
+        env_only (bool, optional): Flag if the pipeline is done for environmental data only. Defaults to False.
+        is_training (bool, optional): Flag if the pipeline is done for training. Defaults to True.
+
+    Returns:
+        transforms.Compose: Output environmental pipeline
+    """
+
+    tot_mean_ls = {}
+    tot_std_ls = {}
+
+    for source, cols in tab_source_cols.items():
+        with open(Path(stats_dir) / f"{source}_mean.json", "r") as f:
+            json_mean = json.load(f)
+
+        cols = sorted(cols)  # Ensure the order is the same as in the model
+
+        mean_array = (
+            np.array([json_mean[col] for col in cols]).reshape(1, len(cols), 1, 1).astype(np.float32)
+        )  # Env: N*C*H*W
+        tot_mean_ls[source] = mean_array
+
+        with open(Path(stats_dir) / f"{source}_std.json", "r") as f:
+            json_std = json.load(f)
+
+        std_array = np.array([json_std[col] for col in cols]).reshape(1, len(cols), 1, 1).astype(np.float32)
+        tot_std_ls[source] = std_array
+
+    mid_mean_array = np.concatenate([tot_mean_ls[source] for source in MID_SOURCE + LOW_SOURCE], axis=1)
+    low_mean_array = np.zeros((1, 1, 1, 1))
+
+    mid_std_array = np.concatenate([tot_std_ls[source] for source in MID_SOURCE + LOW_SOURCE], axis=1)
+    low_std_array = np.zeros((1, 1, 1, 1))
+
+    transform_list = []
+    transform_list.append(EnvToTensor(with_loc=with_loc))  # data from numpy arrays to torch.float32
+    transform_list.append(EnvRescaleBaseline(mid_size=model_config["mid_input_res"], ratio=model_config["era_ratio"]))
+    transform_list.append(EnvConcatBaseline(mid_keys=MID_SOURCE + LOW_SOURCE, low_keys=LOW_SOURCE))
     transform_list.append(
         EnvNormalize(mid_mean=mid_mean_array, mid_std=mid_std_array, low_mean=low_mean_array, low_std=low_std_array)
     )  # normalize all inputs individually

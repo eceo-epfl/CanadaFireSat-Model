@@ -1,4 +1,5 @@
 """Library of data augmentations for training adapted from deepsat"""
+
 import math
 import random
 from copy import deepcopy
@@ -154,6 +155,93 @@ class EnvRescale(object):
         return img
 
 
+class EnvRescaleBaseline(object):
+    """
+    Differ from EnvRescale as Low Inputs are rescaled to the same size as Mid Inputs, and not to their original size.
+    items in  : modis11, modis13_15, era5, cds, doy
+    items out : modis11, modis13_15, era5, cds, doy
+    """
+
+    def __init__(self, mid_size, ratio):
+        self.mid_size = mid_size
+        self.ratio = ratio
+
+    def __call__(self, sample):
+        for inputc in ["modis11_mask"]:
+            if sample[inputc] is not None:
+                sample[inputc] = self.rescale_3d_map(sample[inputc], self.mid_size, mode="nearest")
+                sample[inputc] = sample[inputc].to(torch.bool)
+
+        for inputc in ["modis11"]:
+            if sample[inputc] is not None:
+                if torch.isnan(sample[inputc]).any():
+                    sample[inputc] = torch.where(
+                        torch.isnan(sample[inputc]), torch.tensor(0.0, device=sample[inputc].device), sample[inputc]
+                    )
+                    sample[inputc] = self.rescale_3d_map(sample[inputc], self.mid_size, mode="bilinear")
+                    sample[inputc][sample[inputc + "_mask"]] = float("nan")
+                else:
+                    sample[inputc] = self.rescale_3d_map(sample[inputc], self.mid_size, mode="bilinear")
+
+        for inputc in ["era5"]:
+            if sample[inputc] is not None:
+                era5_size = sample[inputc].shape[-1]
+                interp_size = int(era5_size * self.ratio)
+                if torch.isnan(sample[inputc]).any():
+                    sample[inputc] = torch.where(
+                        torch.isnan(sample[inputc]), torch.tensor(0.0, device=sample[inputc].device), sample[inputc]
+                    )
+                    sample[inputc] = self.rescale_3d_map(sample[inputc], interp_size, mode="bilinear")
+                    sample[inputc] = self.center_crop(sample[inputc], self.mid_size)
+                    sample[inputc + "_mask"] = self.rescale_3d_map(
+                        sample[inputc + "_mask"], interp_size, mode="nearest"
+                    ).to(torch.bool)
+                    sample[inputc + "_mask"] = self.center_crop(sample[inputc + "_mask"], self.mid_size)
+                    sample[inputc][sample["era5_mask"]] = float("nan")
+                else:
+                    sample[inputc] = self.rescale_3d_map(sample[inputc], interp_size, mode="bilinear")
+                    sample[inputc] = self.center_crop(sample[inputc], self.mid_size)
+
+        for inputc in ["cds"]:
+            if sample[inputc] is not None:
+                sample[inputc], sample[inputc + "_mask"] = self.center_pixel_expand(sample[inputc], self.mid_size)
+
+        return sample
+
+    def rescale_3d_map(self, img, size, mode):
+        img = F.interpolate(img, size=(size, size), mode=mode)
+        return img
+
+    def center_crop(self, img, size):
+        h, w = img.shape[-2], img.shape[-1]
+        top = (h - size) // 2
+        left = (w - size) // 2
+        return img[..., top : top + size, left : left + size]
+
+    def center_pixel_expand(self, img, size):
+        h, w = img.shape[-2], img.shape[-1]
+        if h % 2 == 1 and w % 2 == 1:
+            cy, cx = h // 2, w // 2
+            center = img[..., cy : cy + 1, cx : cx + 1]  # (..., C, 1, 1)
+        else:
+            cy, cx = h // 2, w // 2
+            four_center = img[..., cy - 1 : cy + 1, cx - 1 : cx + 1]  # (..., C, 2, 2)
+            if torch.isnan(four_center).any():
+                nan_mask = torch.isnan(four_center)
+                four_center_clean = torch.where(nan_mask, torch.tensor(0.0, device=img.device), four_center)
+                valid_count = (~nan_mask).sum(dim=(-2, -1), keepdim=True).float()  # (..., C, 1, 1)
+                center = four_center_clean.sum(dim=(-2, -1), keepdim=True) / valid_count.clamp(min=1)
+                all_nan = nan_mask.all(dim=(-2, -1), keepdim=True)
+                center = torch.where(all_nan, torch.tensor(float("nan"), device=img.device), center)
+            else:
+                center = four_center.mean(dim=(-2, -1), keepdim=True)  # (..., C, 1, 1)
+
+        # Expand center value to (size, size)
+        expanded = center.expand(*center.shape[:-2], size, size).clone()
+        mask = torch.isnan(expanded)
+        return expanded, mask
+
+
 class Concat(object):
     """
     Concat all inputs
@@ -213,6 +301,49 @@ class EnvConcat(object):
         return sample
 
 
+class EnvConcatBaseline(object):
+    """
+    Differ from EnvConcat in that it does not concatenate the low inputs,
+    but instead creates a placeholder of zeros with the same shape as the low inputs.
+    This is useful for baseline models that merge high and low resolution inputs.
+    """
+
+    def __init__(self, mid_keys, low_keys):
+        self.mid_keys = mid_keys
+        self.low_keys = low_keys
+
+    def __call__(self, sample):
+        try:
+            mid_keys = [key for key in self.mid_keys if sample[key] is not None]
+            mid_mask_keys = [f"{key}_mask" for key in self.mid_keys if sample[key] is not None]
+            low_keys = [key for key in self.low_keys if sample[key] is not None]
+            low_mask_keys = [f"{key}_mask" for key in self.low_keys if sample[key] is not None]
+
+            mid_inputs = torch.cat([sample[key] for key in mid_keys], dim=1)
+            mid_inputs_mask = torch.cat([sample[key].to(torch.bool) for key in mid_mask_keys], dim=1)
+            sample["mid_inputs"] = mid_inputs
+            sample["mid_inputs_mask"] = mid_inputs_mask
+
+            # Low Inputs Placeholder
+            ref = sample[low_keys[0]]
+            T = ref.shape[0]
+            H, W = ref.shape[-2:]
+            device = ref.device
+            dtype = ref.dtype
+            sample["low_inputs"] = torch.zeros(T, 1, H, W, device=device, dtype=dtype)
+            sample["low_inputs_mask"] = torch.ones(T, 1, H, W, device=device, dtype=torch.bool)
+
+            sample = {
+                key: sample[key]
+                for key in sample.keys()
+                if key not in mid_keys + low_keys + mid_mask_keys + low_mask_keys
+            }
+        except:
+            print([("conc", key, sample[key].shape) for key in sample.keys()])
+
+        return sample
+
+
 class Normalize(object):
     """
     Normalize inputs as in https://arxiv.org/pdf/1802.02080.pdf
@@ -234,7 +365,9 @@ class Normalize(object):
 class Crop(object):
     """Crop randomly the image in a sample."""
 
-    def __init__(self, img_size: int, crop_size: int, random: bool =False, ground_truths: List[str] = [], with_loc: bool = False):
+    def __init__(
+        self, img_size: int, crop_size: int, random: bool = False, ground_truths: List[str] = [], with_loc: bool = False
+    ):
         self.img_size = img_size
         self.crop_size = crop_size
         self.random = random
@@ -308,7 +441,9 @@ class HVFlip(object):
         self.vflip_prob = vflip_prob
         self.with_loc = with_loc
 
-    def __call__(self, sample: Dict[str, torch.Tensor]) -> Union[Dict[str, torch.Tensor], Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]]:
+    def __call__(
+        self, sample: Dict[str, torch.Tensor]
+    ) -> Union[Dict[str, torch.Tensor], Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]]:
 
         # Extract the image and environmental data
         if isinstance(sample, (list, tuple)):
@@ -373,8 +508,10 @@ class MixHVFlip(object):
         self.vflip_prob = vflip_prob
         self.with_loc = with_loc
 
-    def __call__(self, img_sample: Dict[str, torch.Tensor], env_sample: Dict[str, torch.Tensor]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    # Attention here we have data in the format THWC and not TCHW because applied after ToTHWC
+    def __call__(
+        self, img_sample: Dict[str, torch.Tensor], env_sample: Dict[str, torch.Tensor]
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        # Attention here we have data in the format THWC and not TCHW because applied after ToTHWC
 
         # Apply the flip
         if random.random() < self.hflip_prob:
@@ -628,7 +765,9 @@ class CutOrPad(object):
             raise ValueError("mode must be either 'image' or 'env'")
         return sample
 
-    def pad_or_cut(self, tensor: torch.Tensor, mask_tensor: torch.Tensor = None, dtype=torch.float32) -> Tuple[torch.Tensor]:
+    def pad_or_cut(
+        self, tensor: torch.Tensor, mask_tensor: torch.Tensor = None, dtype=torch.float32
+    ) -> Tuple[torch.Tensor]:
         """Pad or Cut the input tensor to the target size"""
         seq_len = tensor.shape[0]
         diff = self.max_seq_len - seq_len
@@ -638,9 +777,7 @@ class CutOrPad(object):
                 pad_shape = [diff]
             else:
                 pad_shape = [diff] + tsize[1:]
-            tensor = torch.cat(
-                (tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0
-            )
+            tensor = torch.cat((tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0)
             mask_tensor = (
                 torch.cat((mask_tensor, torch.zeros(pad_shape, dtype=dtype)), dim=0)
                 if mask_tensor is not None

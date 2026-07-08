@@ -15,10 +15,10 @@ def get_model(config, device):
         "TabResNetConvLSTM",
         "TabViTFactorizeModel",
         "MultiViTFactorizeModel",
+        "UNet",
+        "UTAE",
     ]:
         return TabModule(config).to(device)
 
     else:
-        raise NameError(
-            f"Model architecture {config['MODEL']['architecture']} not found, choose from: 'TSViT' or 'TabTSViT'"
-        )
+        raise NameError(f"Model architecture {config['MODEL']['architecture']} not found")
