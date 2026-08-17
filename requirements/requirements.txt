@@ -83,3 +83,9 @@ overcomplete
 # FWI baseline
 rasterio
 xarray
+
+# Sparse Autoencoders
+esda
+libpysal
+pyrootutils
+imbalanced-learn

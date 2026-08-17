@@ -609,9 +609,9 @@ class MSClipTemporalCBM(nn.Module):
 
         if use_temp:
 
-         if seq_len is None:
-            # If caller doesn't provide true sequence lengths, assume all timesteps are valid.
-            seq_len = torch.full((B,), T, device=batch.device, dtype=torch.long)
+            if seq_len is None:
+                # If caller doesn't provide true sequence lengths, assume all timesteps are valid.
+                seq_len = torch.full((B,), T, device=batch.device, dtype=torch.long)
 
             t_idx = torch.arange(T, device=batch.device).unsqueeze(0)      # [1,T]
             valid_BT  = t_idx < seq_len.unsqueeze(1)                       # [B,T] True=valid
