@@ -19,23 +19,19 @@ from overcomplete.sae.train import _compute_reconstruction_error, extract_input
 from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
 
-from src.model.geoencoder import BandTopKSAE
-from src.model.loan import LOAN
-from src.model.metrics import (
+from experiments.concept_bottleneck.sae.metrics import (
     compute_coherence,
     compute_effective_rank,
     compute_stable_rank,
 )
-from src.model.sae_utils import (
+from experiments.concept_bottleneck.sae.sae_utils import (
     criterion_factory,
     mse_criterion,
     optimizer_factory,
-    region_mse_bands_per_class,
-    region_r2_bands_per_class,
     scheduler_factory,
 )
-from src.model.trackers import DeadCodeTracker
-from src.model.xplainer_utils import points_ext
+from experiments.concept_bottleneck.sae.trackers import DeadCodeTracker
+from experiments.concept_bottleneck.sae.utils import points_ext
 
 NAME_CLASS = {0: "No Fire", 1: "Fire"}
 
@@ -60,8 +56,6 @@ class plSAE(pl.LightningModule):
         criterion_kwargs: Dict[str, Any] = {},
         dead_feature_window: int = 1000,
         name_class: Dict[str, int] = NAME_CLASS,
-        use_loan: bool = False,
-        json_path: Optional[str] = None,
         **kwargs,
     ):
         super().__init__()
@@ -107,15 +101,6 @@ class plSAE(pl.LightningModule):
         else:
             self.geonet = None
 
-        if use_loan:
-            print("Initializing LOAN module")
-            self.loan = LOAN(
-                in_channels=self.net.dictionary.in_dimensions, cond_channels=2, norm=False, json_path=json_path
-            )
-            self.norm_layer = nn.BatchNorm1d(self.net.dictionary.in_dimensions, affine=False)
-        else:
-            self.loan = None
-
         self.geo_class = geo_class
         self.train_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], dead_feature_window)
         self.val_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], None)
@@ -133,8 +118,6 @@ class plSAE(pl.LightningModule):
 
         if sae_type == "topk":
             return TopKSAE(**sae_kwargs)
-        elif sae_type == "band_topk":
-            return BandTopKSAE(**sae_kwargs)
         elif sae_type == "jump":
             return JumpSAE(**sae_kwargs)
         elif sae_type == "batch_topk":
@@ -201,19 +184,6 @@ class plSAE(pl.LightningModule):
 
             return z_pre, z, x_hat, x_mod
 
-        if self.loan is not None and lat is not None and long is not None:
-            x_mod, scale, shift = self.loan(x, lat, long)
-            z_pre, z, x_hat_mod = self.net(x_mod)
-            x_hat = (x_hat_mod - shift) / (scale + 1e-8)
-
-            if flag_params:
-                return z_pre, z, x_hat, x_mod, scale, shift, self.loan._cached_mean, self.loan._cached_std
-
-            return z_pre, z, x_hat, x_mod
-
-        if isinstance(self.net, BandTopKSAE) and lat is not None:
-            return self.net(x, lat)
-
         return self.net(x)
 
     def _spatial_embedding(self, lat: torch.Tensor, long: torch.Tensor) -> torch.Tensor:
@@ -239,7 +209,10 @@ class plSAE(pl.LightningModule):
             ghost_grad_neuron_mask = None
 
         ### Geolocational Conditioning
-        if self.geonet is not None or self.loan is not None:
+        if self.geonet is not None:
+
+            raise NotImplementedError("Geolocational Conditioning is not implemented yet")
+
             lat = batch["latitude"]
             long = batch["longitude"]
             label = batch["label"]
@@ -247,9 +220,6 @@ class plSAE(pl.LightningModule):
             ### Different Ways to Forward
             if self.geo_class:
                 z_pre, z, x_hat, x_mod, scale, shift = self.forward(x, lat, long, label, flag_params=True)
-            elif self.loan is not None:
-                x = self.norm_layer(x)
-                z_pre, z, x_hat, x_mod, scale, shift, mean, std = self.forward(x, lat, long, flag_params=True)
             else:
                 z_pre, z, x_hat, x_mod, scale, shift = self.forward(x, lat, long, flag_params=True)
 
@@ -258,19 +228,8 @@ class plSAE(pl.LightningModule):
                 loss = self.criterion(
                     x, x_hat, z_pre, z, self.net.get_dictionary(), ghost_grad_neuron_mask, scale=scale, shift=shift
                 )
-            elif self.loan is not None:
-                loss = self.criterion(x, x_hat, z_pre, z, self.net.get_dictionary(), scale=scale, shift=shift)
             else:
                 loss = self.criterion(x, x_hat, z_pre, z, self.net.get_dictionary(), scale=scale, shift=shift)
-
-        elif isinstance(self.net, BandTopKSAE):
-            lat = batch["latitude"]
-            z_pre, z, x_hat = self.net(x, lat)
-            x_mod = None
-            if self.use_ghost:
-                loss = self.criterion(x, x_hat, z_pre, z, self.net.get_dictionary(), ghost_grad_neuron_mask)
-            else:
-                loss = self.criterion(x, x_hat, z_pre, z, self.net.get_dictionary())
 
         ### No Geolocational Conditioning
         else:
@@ -284,13 +243,9 @@ class plSAE(pl.LightningModule):
         tracker.update(z)
 
         if flag_mse:
-            lat = batch["latitude"]
             label = batch["label"]
             mse = mse_criterion(x, x_hat, z_pre, z, self.net.get_dictionary())
-            region_mse = region_mse_bands_per_class(
-                x, x_hat, z_pre, z, self.net.get_dictionary(), lat, label, class_names=self.name_class
-            )
-            return loss, z_pre, z, x, x_hat, x_mod, (mse, region_mse)
+            return loss, z_pre, z, x, x_hat, x_mod, mse
 
         return loss, z_pre, z, x, x_hat, x_mod
 
@@ -334,7 +289,7 @@ class plSAE(pl.LightningModule):
         )
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> Dict[str, torch.Tensor]:
-        loss, _, codes, inputs, rec_inputs, _, (mse, region_mse) = self.step(
+        loss, _, codes, inputs, rec_inputs, _, mse = self.step(
             batch, tracker=self.val_dead_tracker, flag_mse=True
         )
 
@@ -344,6 +299,8 @@ class plSAE(pl.LightningModule):
         ), "Class specific error need labels in shape N*1 or N"
         if len(batch["label"].shape) > 1:
             label = batch["label"].squeeze()
+        else:
+            label = batch["label"]
         codes_stats = {}
         for class_id in torch.unique(label):
             class_codes = codes[label == class_id, :]
@@ -360,9 +317,6 @@ class plSAE(pl.LightningModule):
         hoyer_error = hoyer(codes).mean().item()
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/mse", mse, on_step=False, on_epoch=True, prog_bar=True)
-        for bands in region_mse.keys():
-            if region_mse[bands] is not None:
-                self.log(f"val/region_mse_{bands}", region_mse[bands], on_step=False, on_epoch=True, prog_bar=False)
         self.log("val/l0", sparsity_error, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/l2", avg_l2_loss(inputs, rec_inputs), on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/hoyer", hoyer_error, on_step=False, on_epoch=True, prog_bar=True)
@@ -371,7 +325,6 @@ class plSAE(pl.LightningModule):
                 "loss": loss,
                 "inputs": inputs.detach().cpu(),
                 "rec_inputs": rec_inputs.detach().cpu(),
-                "lat": batch["latitude"].detach().cpu(),
                 "label": batch["label"].detach().cpu(),
                 "codes_stats": codes_stats,
             }
@@ -383,7 +336,6 @@ class plSAE(pl.LightningModule):
         outputs = self._val_outputs
         inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
         rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        lat = torch.cat([x["lat"] for x in outputs], dim=0)
         label = torch.cat([x["label"] for x in outputs], dim=0)
 
         alive_features = self.val_dead_tracker.alive_features
@@ -392,7 +344,6 @@ class plSAE(pl.LightningModule):
         )
         self._val_outputs.clear()
         rec_error = _compute_reconstruction_error(inputs, rec_inputs)
-        region_rec_error = region_r2_bands_per_class(inputs, rec_inputs, lat, label, class_names=self.name_class)
         self.log("val/r2", rec_error, prog_bar=True)
         self.log("val/class_selectivity", selectivity)
         self.log("val/class_selectivity_firing", selectivity_firing)
@@ -402,10 +353,6 @@ class plSAE(pl.LightningModule):
 
         for class_id, size in class_size_firing.items():
             self.log(f"val/class_size_firing_{self.name_class[class_id]}", size, prog_bar=False)
-
-        for bands in region_rec_error.keys():
-            if region_rec_error[bands] is not None:
-                self.log(f"val/region_r2_{bands}", region_rec_error[bands], prog_bar=False)
 
         # Computing Val Dead Ratio
         dead_ratio = self.val_dead_tracker.get_dead_ratio()
@@ -426,7 +373,7 @@ class plSAE(pl.LightningModule):
         )
 
     def test_step(self, batch: Dict[str, Any], batch_idx: int) -> Dict[str, torch.Tensor]:
-        loss, _, codes, inputs, rec_inputs, mod_inputs, (mse, region_mse) = self.step(
+        loss, _, codes, inputs, rec_inputs, mod_inputs, mse = self.step(
             batch, tracker=self.test_dead_tracker, flag_mse=True
         )
 
@@ -452,9 +399,6 @@ class plSAE(pl.LightningModule):
         hoyer_error = hoyer(codes).mean().item()
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/mse", mse, on_step=False, on_epoch=True, prog_bar=True)
-        for bands in region_mse.keys():
-            if region_mse[bands] is not None:
-                self.log(f"test/region_mse_{bands}", region_mse[bands], on_step=False, on_epoch=True, prog_bar=False)
         self.log("test/l0", sparsity_error, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/l2", avg_l2_loss(inputs, rec_inputs), on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/hoyer", hoyer_error, on_step=False, on_epoch=True, prog_bar=True)
@@ -464,8 +408,6 @@ class plSAE(pl.LightningModule):
                 "inputs": inputs.detach().cpu(),
                 "rec_inputs": rec_inputs.detach().cpu(),
                 "mod_inputs": mod_inputs.detach().cpu() if mod_inputs is not None else None,
-                "lat": batch["latitude"].detach().cpu(),
-                "lon": batch["longitude"].detach().cpu(),
                 "label": batch["label"].detach().cpu(),
                 "codes": codes.detach().cpu(),
                 "codes_stats": codes_stats,
@@ -478,7 +420,6 @@ class plSAE(pl.LightningModule):
         outputs = self._test_outputs
         inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
         rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        lat = torch.cat([x["lat"] for x in outputs], dim=0)
         label = torch.cat([x["label"] for x in outputs], dim=0)
 
         alive_features = self.test_dead_tracker.alive_features
@@ -487,7 +428,6 @@ class plSAE(pl.LightningModule):
         )
         self._test_outputs.clear()
         rec_error = _compute_reconstruction_error(inputs, rec_inputs)
-        region_rec_error = region_r2_bands_per_class(inputs, rec_inputs, lat, label, class_names=self.name_class)
         self.log("test/r2", rec_error, prog_bar=True)
         self.log("test/class_selectivity", selectivity)
         self.log("test/class_selectivity_firing", selectivity_firing)
@@ -495,10 +435,6 @@ class plSAE(pl.LightningModule):
         for class_id, size in class_size.items():
             self.log(f"test/class_size_{self.name_class[class_id]}", size, prog_bar=False)
             self.log(f"test/class_size_firing_{self.name_class[class_id]}", class_size_firing[class_id], prog_bar=False)
-
-        for bands in region_rec_error.keys():
-            if region_rec_error[bands] is not None:
-                self.log(f"test/region_r2_{bands}", region_rec_error[bands], prog_bar=False)
 
         # Computing Test Dead Ratio
         dead_ratio = self.test_dead_tracker.get_dead_ratio()
@@ -536,20 +472,15 @@ class plSAE(pl.LightningModule):
             x = extract_input(batch)
             x = x.to(self.device)
 
-            if self.geonet is not None or self.loan is not None:
+            if self.geonet is not None:
+                raise NotImplementedError("Geolocational Conditioning is not implemented yet")
                 lat = batch["latitude"].to(self.device)
                 long = batch["longitude"].to(self.device)
                 label = batch["label"].to(self.device)
                 if self.geo_class:
                     z_pre, z, x_hat, _ = self.forward(x, lat, long, label)
-                elif self.loan is not None:
-                    x = self.norm_layer(x)
-                    z_pre, z, x_hat, _ = self.forward(x, lat, long)
                 else:
                     z_pre, z, x_hat, _ = self.forward(x, lat, long)
-            elif isinstance(self.net, BandTopKSAE):
-                lat = batch["latitude"].to(self.device)
-                z_pre, z, x_hat = self.net(x, lat)
             else:
                 z_pre, z, x_hat = self.net(x)
 
@@ -570,7 +501,8 @@ class plSAE(pl.LightningModule):
             sampled_input = extract_input(raw_input).to(self.device)
 
             # RAW Resample
-            if self.geonet is not None or self.loan is not None:
+            if self.geonet is not None:
+                raise NotImplementedError("Geolocational Conditioning is not implemented yet")
                 lat = raw_input["latitude"].to(self.device)
                 long = raw_input["longitude"].to(self.device)
                 label = raw_input["label"].to(self.device)
@@ -578,11 +510,6 @@ class plSAE(pl.LightningModule):
                     _, _, _, sampled_input = self.forward(
                         sampled_input.unsqueeze(0), lat.unsqueeze(0), long.unsqueeze(0), label.unsqueeze(0)
                     )
-                elif self.loan is not None:
-                    self.eval()  # Because of the BatchNorm
-                    sampled_input = self.norm_layer(sampled_input.unsqueeze(0))
-                    _, _, _, sampled_input = self.forward(sampled_input, lat.unsqueeze(0), long.unsqueeze(0))
-                    self.train()
                 else:
                     _, _, _, sampled_input = self.forward(
                         sampled_input.unsqueeze(0), lat.unsqueeze(0), long.unsqueeze(0)
@@ -590,78 +517,40 @@ class plSAE(pl.LightningModule):
 
             sampled_input = sampled_input / sampled_input.norm(p=2)
             self.net.dictionary._weights[dead_idx, :] = sampled_input  # Based on Overcomplete Framework
-
-            if isinstance(self.net, BandTopKSAE):
-                alive_norm = self.net.encoder.weight[self.train_dead_tracker.alive_features, :].norm(
-                    dim=1
-                )  # Dimension should be n_concept, last_dimension
-            else:
-                alive_norm = (
-                    self.net.encoder.final_block[0].weight[self.train_dead_tracker.alive_features, :].norm(dim=1)
-                )  # Dimension should be n_concept, last_dimension
+            alive_norm = (
+                self.net.encoder.final_block[0].weight[self.train_dead_tracker.alive_features, :].norm(dim=1)
+            )  # Dimension should be n_concept, last_dimension
             mean_alive_norm = alive_norm.mean()
             target_norm = mean_alive_norm * 0.2
 
-            if isinstance(self.net, BandTopKSAE):
-                self.net.encoder.weight[dead_idx, :] = sampled_input * target_norm
-                self.net.encoder.band_bias[:, dead_idx] = 0.0
-            else:
-                self.net.encoder.final_block[0].weight[dead_idx, :] = sampled_input * target_norm
-                self.net.encoder.final_block[0].bias[dead_idx] = 0.0
+            self.net.encoder.final_block[0].weight[dead_idx, :] = sampled_input * target_norm
+            self.net.encoder.final_block[0].bias[dead_idx] = 0.0
 
             optimizer = self.optimizers()
             if isinstance(optimizer, torch.optim.Adam):
                 # Handle encoder weight row
-                if isinstance(self.net, BandTopKSAE):
-                    enc_weight_param = self.net.encoder.weight
-                    enc_bias_param = self.net.encoder.band_bias
-                else:
-                    enc_weight_param = self.net.encoder.final_block[0].weight
-                    enc_bias_param = self.net.encoder.final_block[0].bias
+                enc_weight_param = self.net.encoder.final_block[0].weight
+                enc_bias_param = self.net.encoder.final_block[0].bias
                 dec_weight_param = self.net.dictionary._weights
-
-                if isinstance(self.net, BandTopKSAE):
-                    for param, index in [
-                        (enc_weight_param, dead_idx),
-                        (dec_weight_param, dead_idx),
-                    ]:
-                        state = optimizer.state.get(param, {})
-                        if state:
-                            state = optimizer.state[param]
-                            if "exp_avg" in state and "exp_avg_sq" in state:
-                                state["exp_avg"][index].zero_()
-                                state["exp_avg_sq"][index].zero_()
-
-                    state = optimizer.state.get(enc_bias_param, {})
+                for param, index in [
+                    (enc_weight_param, dead_idx),
+                    (enc_bias_param, dead_idx),
+                    (dec_weight_param, dead_idx),
+                ]:
+                    state = optimizer.state.get(param, {})
                     if state:
-                        state = optimizer.state[enc_bias_param]
+                        state = optimizer.state[param]
                         if "exp_avg" in state and "exp_avg_sq" in state:
-                            state["exp_avg"][:, index].zero_()
-                            state["exp_avg_sq"][:, index].zero_()
-                else:
-                    for param, index in [
-                        (enc_weight_param, dead_idx),
-                        (enc_bias_param, dead_idx),
-                        (dec_weight_param, dead_idx),
-                    ]:
-                        state = optimizer.state.get(param, {})
-                        if state:
-                            state = optimizer.state[param]
-                            if "exp_avg" in state and "exp_avg_sq" in state:
-                                state["exp_avg"][index].zero_()
-                                state["exp_avg_sq"][index].zero_()
+                            state["exp_avg"][index].zero_()
+                            state["exp_avg_sq"][index].zero_()
             else:
                 raise NotImplementedError("Specify reset for other optimizer types")
 
     @torch.no_grad()
     def _initialize_encoder_from_decoder(self):
         """Set encoder final layer weights equal to decoder dictionary weights."""
-        if isinstance(self.net, BandTopKSAE):
-            self.net.encoder.weight.copy_(self.net.dictionary.get_dictionary())
-            self.net.encoder.band_bias.zero_()
-        else:
-            self.net.encoder.final_block[0].weight.copy_(self.net.dictionary._weights)
-            self.net.encoder.final_block[0].bias.zero_()
+        self.net.encoder.final_block[0].weight.copy_(self.net.dictionary._weights)
+        self.net.encoder.final_block[0].bias.zero_()
 
     @torch.no_grad()
     def set_init_class(

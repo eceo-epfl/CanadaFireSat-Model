@@ -171,7 +171,7 @@ def compute_simplified_silhouette(
     return s_approx_np
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="cluster_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="cluster_concept")
 def cluster_concept(cfg: DictConfig):
 
     dict_atom = pd.read_csv(cfg.concept_df_path)["concept"].tolist()

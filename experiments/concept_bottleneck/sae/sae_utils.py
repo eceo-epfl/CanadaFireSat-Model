@@ -84,7 +84,7 @@ def optimizer_factory(optim_type: str, **kwargs) -> torch.optim.Optimizer:
 
 def scheduler_factory(
     scheduler_type: str, optimizer: torch.optim.Optimizer
-) -> Optional[torch.optim.lr_scheduler.LRScheduler]:
+) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
     if scheduler_type == "lr_plateau":
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     else:

@@ -1,7 +1,6 @@
 # Local Code
 -e .
 -e external/ms_clip
--e external/ms_clip_fork
 
 setuptools==68.2.2
 # Adapted from .yaml file in VITS for SITS
@@ -66,6 +65,7 @@ matplotlib
 
 # Extension Libraries
 hydra-core
+hydra-colorlog
 pytorch-lightning==2.2
 wandb
 scikit-learn

@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-packages = find_packages(include=["src", "src.*", "deepsat", "deepsat.*"])
+packages = find_packages(include=["src", "src.*", "deepsat", "deepsat.*", "experiments", "experiments.*"])
 
 setup(
     name="CanadaFireSat-Model",

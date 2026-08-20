@@ -20,7 +20,7 @@ from src.data import get_data
 from experiments.concept_bottleneck.eval.utils import compute_image_entropy_normalized, log_metrics, bimodality_coefficient, babel_function
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="eval_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="eval_concept")
 def compute_text_patch_metrics(cfg: DictConfig):
 
     cfg = OmegaConf.to_container(cfg, resolve=True)

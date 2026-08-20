@@ -557,7 +557,7 @@ def keyphrase_extraction(
     return terms, freqs
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="extract_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="extract_concept")
 def extract_concepts(cfg: DictConfig):
 
     if cfg.download_captions:

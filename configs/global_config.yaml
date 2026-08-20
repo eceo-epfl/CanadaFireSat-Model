@@ -10,6 +10,7 @@ hydra:
 
 wandb:
   project: "wildfire-forecast"
+  project_cbm: "concept-bottleneck-wildfire-forecast"
   user: "hporta"
 
 paths:
@@ -31,3 +32,6 @@ paths:
   neg_env_tab: "/media/data/boreal_data/NEG_TS_UPDATE"
   neg_env_tab_hard: "/media/data/boreal_data/NEG_TS_UPDATE_HARD"
   fwi: "/media/data/boreal_data/full/CDS"
+  root_dir: ${hydra:runtime.cwd}
+  log_dir: ${paths.root_dir}/results/logs/
+  output_dir: ${hydra:runtime.output_dir}

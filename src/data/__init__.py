@@ -1,3 +1,5 @@
+from omegaconf import DictConfig, OmegaConf
+
 from src.data.Canada.datamodule import EnvDataModule, SatDataModule, TabSatDataModule
 from src.data.hf_Canada.hf_datamodule import EnvDataModule as HfEnvDataModule
 from src.data.hf_Canada.hf_datamodule import SatDataModule as HfSatDataModule
@@ -5,6 +7,10 @@ from src.data.hf_Canada.hf_datamodule import TabSatDataModule as HfTabSatDataMod
 
 
 def get_data(config):
+
+    if isinstance(config, DictConfig):
+        config = OmegaConf.to_container(config, resolve=True)
+
     kwargs = config["DATASETS"].get("kwargs") or {}
 
     architecture = config["MODEL"]["architecture"]

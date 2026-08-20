@@ -2,11 +2,11 @@ defaults:
   - _self_
   - global_config
 
-model_path: "./results/models/NORMFIX_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-19-f1-0.47.ckpt" # Need to specify exact model path
+model_path: "./results/models/MIXLOSS_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.43.ckpt" # Need to specify exact model path
 config_name: "config_file.yaml"
 mode: "image"
 split: "val"
-output_dir: "./results/models/NORMFIX_HIGHLR10X_MSCLIP_SITS_ONLY"
+output_dir: "./results/models/MIXLOSS_MSCLIP_SITS_ONLY"
 seed: 42
 with_region: True
 fwi_ths: [5, 10, 20, 30]
@@ -50,7 +50,7 @@ MODEL:
 SOLVER:
   num_epochs: 20
   num_warmup_epochs: 2
-  loss_function: masked_dice_loss
+  loss_function: combined_dice_ce
 
 ### Leveraging RAW *.npy files ###
 DATASETS:
