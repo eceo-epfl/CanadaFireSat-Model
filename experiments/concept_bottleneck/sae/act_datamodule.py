@@ -126,6 +126,7 @@ class OnlineActDataModule(LightningDataModule):
         val_dataset: Optional[Dataset] = None,
         test_dataset: Optional[Dataset] = None,
         device: str = "cuda",
+        test_batch_size: Optional[int] = None,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -133,6 +134,7 @@ class OnlineActDataModule(LightningDataModule):
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.test_dataset = test_dataset
+        self.test_batch_size = test_batch_size if test_batch_size is not None else batch_size
         self._device_str = device
         self.size = (
             int(self.model.model.num_patches**0.5),
@@ -164,7 +166,7 @@ class OnlineActDataModule(LightningDataModule):
         if self.test_dataset is not None:
             return DataLoader(
                 OnlineActivationDataset(self.test_dataset),
-                batch_size=self.batch_size,
+                batch_size=self.test_batch_size,
                 shuffle=False,
                 num_workers=num_workers,
             )
@@ -175,7 +177,7 @@ class OnlineActDataModule(LightningDataModule):
         doy = batch["doy"].to(self._device_str)
         seq_lengths = batch["seq_lengths"].to(self._device_str)
 
-        print(f"Batch inputs shape: {inputs.shape}, DOY shape: {doy.shape}, Seq lengths shape: {seq_lengths.shape}")
+        # print(f"Batch inputs shape: {inputs.shape}, DOY shape: {doy.shape}, Seq lengths shape: {seq_lengths.shape}")
 
         with torch.no_grad():
             patch_embed = self.model.model.encode_patches(
@@ -186,8 +188,8 @@ class OnlineActDataModule(LightningDataModule):
         # --- Batched label prep ---
         labels = batch["labels"].to(self._device_str)  # [B, ...]
 
-        print(f"Batch labels shape: {labels.shape}")
-        print(f"Batch patch_embed shape: {patch_embed.shape}")
+        #print(f"Batch labels shape: {labels.shape}")
+        # print(f"Batch patch_embed shape: {patch_embed.shape}")
 
         if labels.dim() == 3:      # [B, H, W]
             labels = labels.unsqueeze(1)  # [B, 1, H, W]
@@ -199,7 +201,7 @@ class OnlineActDataModule(LightningDataModule):
         ).round().long()  # [B, 1, H', W']
         labels = labels.view(-1)  # [B * P]
 
-        print(f"Resized and flattened labels shape: {labels.shape}")
+        # print(f"Resized and flattened labels shape: {labels.shape}")
 
         ## --- Ignoring unknown masks for now; CanadaFireSat does not contain them ---
 

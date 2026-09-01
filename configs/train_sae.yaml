@@ -86,6 +86,7 @@ sae_batch_size: 8
 sae_min_epochs: 1
 sae_max_epochs: 10
 sae_ckpt_path: null
+use_archetypical: False
 
 # tags to help you identify your experiments
 # you can overwrite this in experiment configs

@@ -24,7 +24,7 @@ MODEL:
   input_img_res: 264
   img_res: 260
   train_max_seq_len: 5
-  test_max_seq_len: 5
+  # test_max_seq_len: 5
   val_max_seq_len: 5
   input_dim: 10
   num_classes: 2

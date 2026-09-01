@@ -2,11 +2,11 @@ defaults:
   - _self_
   - global_config
 
-model_path: "./results/models/MIXLOSS_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.43.ckpt" # Need to specify exact model path
+model_path: "./results/models/MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt" # Need to specify exact model path
 config_name: "config_file.yaml"
 mode: "image"
-split: "val"
-output_dir: "./results/models/MIXLOSS_MSCLIP_SITS_ONLY"
+split: "test"
+output_dir: "./results/models/MIXLOSS_HIGHLR10X_VPT_SITS_ONLY"
 seed: 42
 with_region: True
 fwi_ths: [5, 10, 20, 30]
@@ -43,7 +43,7 @@ MODEL:
     keep_residual: False   # should be false for ClearCLIP
     attn_variant: "qq"
   vpt_config:
-    enabled: False
+    enabled: True
     num_tokens: 20
     total_d_layer: 11
 

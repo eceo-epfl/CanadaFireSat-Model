@@ -67,10 +67,14 @@ def train(cfg: DictConfig):
     datamodule = get_data(cfg)
     train_dataset = datamodule.test_dataloader(split="train").dataset
     val_dataset = datamodule.test_dataloader(split="val").dataset
-    test_dataset = datamodule.test_dataloader(split="test").dataset
+
+    ### For Test we want batch size of 1 and adaptive sequence length (no padding) ###
+    cfg.MODEL.test_max_seq_len = None
+    test_datamodule = get_data(cfg)
+    test_dataset = test_datamodule.test_dataloader(split="test").dataset
     sae_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                          test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
-                                         batch_size=cfg.sae_batch_size)
+                                         batch_size=cfg.sae_batch_size, test_batch_size=1)
 
     log.info(f"Instantiating SAE <{cfg.sae._target_}>")
     sae: plSAE = hydra.utils.instantiate(cfg.sae)
@@ -84,11 +88,10 @@ def train(cfg: DictConfig):
     log.info(f"Instantiating trainer <{cfg.trainer_sae._target_}>")
     trainer_sae: Trainer = hydra.utils.instantiate(cfg.trainer_sae, callbacks=callbacks, logger=logger)
 
-    """
     if cfg.get("use_archetypical", False):
-        X = np.load(cfg.get("train_npy_path"), mmap_mode="r")
-        y = np.load(cfg.get("train_label_path"), mmap_mode="r")
-        sae.set_arch(X=X, y=y, arch_kwargs=cfg.sae.get("arch_kwargs", {"ext_type": "all"}))
+        sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
+
+    """
     elif cfg.get("use_class_init", False):
         X = np.load(cfg.get("train_npy_path"), mmap_mode="r")
         y = np.load(cfg.get("train_label_path"), mmap_mode="r")

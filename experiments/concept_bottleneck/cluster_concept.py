@@ -171,7 +171,7 @@ def compute_simplified_silhouette(
     return s_approx_np
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="cluster_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="cluster_concept") # / "concept_bottleneck"
 def cluster_concept(cfg: DictConfig):
 
     dict_atom = pd.read_csv(cfg.concept_df_path)["concept"].tolist()
@@ -192,7 +192,7 @@ def cluster_concept(cfg: DictConfig):
             batch = texts[i:i + batch_size]
             toks = tokenizer(batch).to(model.device)
             e = model.inference_text(toks)
-            e = F.normalize(e, dim=-1)
+            # e = F.normalize(e, dim=-1)
             embs.append(e.cpu())
         return torch.cat(embs, dim=0)  # [N, D]
 

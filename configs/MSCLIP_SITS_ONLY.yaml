@@ -40,9 +40,9 @@ SOLVER:
   pos_weight: 6.7
   loss_function: combined_dice_ce
   lr_scheduler: 'cosine'
-  lr_base: 5e-4
-  lr_min: 1e-5
-  lr_start: 1e-5
+  lr_base: 1e-5
+  lr_min: 5e-7
+  lr_start: 5e-7
   num_cycles: 1
   weight_decay: 0.01
   accumulate_grad_batches: 2
@@ -106,7 +106,7 @@ DATASETS:
 
 CHECKPOINT:
   load_from_checkpoint:
-  experiment_name: "RERUN_MIXLOSS_HIGHLR100X_MSCLIP_SITS_ONLY"
+  experiment_name: "MIXLOSS_HIGH5X_SITS_ONLY"
   save_path: "./results/models"
   train_metrics_steps: 200
   save_steps: 10000

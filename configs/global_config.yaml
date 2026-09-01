@@ -35,3 +35,4 @@ paths:
   root_dir: ${hydra:runtime.cwd}
   log_dir: ${paths.root_dir}/results/logs/
   output_dir: ${hydra:runtime.output_dir}
+  dict_path: "${paths.root_dir}/results/DictionnaryWordsGeneral"

@@ -1,0 +1,31 @@
+_target_: experiments.concept_bottleneck.sae.sae_module.plSAE
+sae_type: "topk"
+loss_type: "mse_auxk"
+optimizer_type: "adam"
+lr: ${sae_lr}
+num_samples: 4500000
+resample_every_n_epochs: 100 # 100 Equivalent to NO resampling or 1 for resampling at each epoch
+resample_batch_size: 256
+bind_init: True
+# name_class: {0: "background", 1: "TC",  2: "AR"}
+
+sae_kwargs:
+  input_shape: ${input_shape}
+  nb_concepts : ${nb_concepts}
+  top_k: ${nb_k}
+  device: "cuda"
+
+criterion_kwargs:
+  penalty: 1.
+
+arch_kwargs:
+  csv_path: null #"${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous.csv"
+  npy_path: "${paths.dict_path}/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy"
+  vocab_size: 30000
+  delta: 1.
+  use_multiplier: True
+  text_enc_kwargs:
+    model_name: Llama3-MS-CLIP-Base
+    pretrained: True
+    channels: 10
+    ckpt_path: null

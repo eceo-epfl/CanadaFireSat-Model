@@ -2,6 +2,7 @@ import math
 import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from einops import rearrange
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -18,6 +19,7 @@ from overcomplete.sae import (
 from overcomplete.sae.train import _compute_reconstruction_error, extract_input
 from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
+from torchmetrics import R2Score
 
 from experiments.concept_bottleneck.sae.metrics import (
     compute_coherence,
@@ -31,7 +33,7 @@ from experiments.concept_bottleneck.sae.sae_utils import (
     scheduler_factory,
 )
 from experiments.concept_bottleneck.sae.trackers import DeadCodeTracker
-from experiments.concept_bottleneck.sae.utils import points_ext
+from experiments.concept_bottleneck.sae.utils import points_ext, points_vocab
 
 NAME_CLASS = {0: "No Fire", 1: "Fire"}
 
@@ -112,6 +114,7 @@ class plSAE(pl.LightningModule):
 
         self._val_outputs = []
         self._test_outputs = []
+        self.test_r2 = R2Score(num_outputs=1, multioutput="uniform_average")
 
     @staticmethod
     def sae_factory(sae_type: str, **sae_kwargs) -> nn.Module:
@@ -128,17 +131,19 @@ class plSAE(pl.LightningModule):
             raise NotImplementedError
 
     @torch.no_grad()
-    def set_arch(self, X: np.ndarray, y: np.ndarray, arch_kwargs: Dict[str, Any] = {}):
+    def set_arch(self, arch_kwargs: Dict[str, Any] = {}):
         arch_kwargs = OmegaConf.to_container(arch_kwargs, resolve=True)
-        points = points_ext(X=X, y=y, **arch_kwargs)
-        arch_kwargs.pop("n_clusters", None)
-        arch_kwargs.pop("ratio", None)
-        arch_kwargs.pop("seed", None)
-        arch_kwargs.pop("ext_type", None)
+        points = points_vocab(device=self.device, **arch_kwargs)
+        arch_kwargs.pop("csv_path", None)
+        arch_kwargs.pop("npy_path", None)
+        arch_kwargs.pop("vocab_size", None)
+        arch_kwargs.pop("test_batch_size", None)
+        arch_kwargs.pop("text_enc_kwargs", None)
         arch_dict = RelaxedArchetypalDictionary(
             in_dimensions=self.net.dictionary.in_dimensions,
             nb_concepts=self.net.nb_concepts,
             points=points,
+            device=self.device,
             **arch_kwargs,
         )
         self.net.dictionary = arch_dict
@@ -325,7 +330,7 @@ class plSAE(pl.LightningModule):
                 "loss": loss,
                 "inputs": inputs.detach().cpu(),
                 "rec_inputs": rec_inputs.detach().cpu(),
-                "label": batch["label"].detach().cpu(),
+                # "label": batch["label"].detach().cpu(),
                 "codes_stats": codes_stats,
             }
         )
@@ -336,7 +341,7 @@ class plSAE(pl.LightningModule):
         outputs = self._val_outputs
         inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
         rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        label = torch.cat([x["label"] for x in outputs], dim=0)
+        # label = torch.cat([x["label"] for x in outputs], dim=0)
 
         alive_features = self.val_dead_tracker.alive_features
         selectivity, selectivity_firing, class_size, class_size_firing = self.class_selectivity(
@@ -371,9 +376,10 @@ class plSAE(pl.LightningModule):
         self.test_dead_tracker.alive_features = torch.zeros(
             self.net.get_dictionary().shape[0], dtype=torch.bool, device=self.device
         )
+        self.test_r2.reset()
 
     def test_step(self, batch: Dict[str, Any], batch_idx: int) -> Dict[str, torch.Tensor]:
-        loss, _, codes, inputs, rec_inputs, mod_inputs, mse = self.step(
+        loss, _, codes, inputs, rec_inputs, _, mse = self.step(
             batch, tracker=self.test_dead_tracker, flag_mse=True
         )
 
@@ -383,6 +389,8 @@ class plSAE(pl.LightningModule):
         ), "Class specific error need labels in shape N*1 or N"
         if len(batch["label"].shape) > 1:
             label = batch["label"].squeeze()
+        else:
+            label = batch["label"]
         codes_stats = {}
         for class_id in torch.unique(label):
             class_codes = codes[label == class_id, :]
@@ -402,32 +410,44 @@ class plSAE(pl.LightningModule):
         self.log("test/l0", sparsity_error, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/l2", avg_l2_loss(inputs, rec_inputs), on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/hoyer", hoyer_error, on_step=False, on_epoch=True, prog_bar=True)
+        self._update_r2(self.test_r2, inputs, rec_inputs)
         self._test_outputs.append(
             {
                 "loss": loss,
-                "inputs": inputs.detach().cpu(),
-                "rec_inputs": rec_inputs.detach().cpu(),
-                "mod_inputs": mod_inputs.detach().cpu() if mod_inputs is not None else None,
-                "label": batch["label"].detach().cpu(),
-                "codes": codes.detach().cpu(),
+                # "inputs": inputs.detach().cpu(),
+                # "rec_inputs": rec_inputs.detach().cpu(),
+                # "label": batch["label"].detach().cpu(),
+                # "codes": codes.detach().cpu(),
                 "codes_stats": codes_stats,
             }
         )
         return {"loss": loss}
 
+    def _update_r2(self, metric, x, x_hat):
+        x, x_hat = x.detach().cpu(), x_hat.detach().cpu()
+        if len(x.shape) == 4 and len(x_hat.shape) == 2:
+            x = rearrange(x, 'n c w h -> (n w h) c')
+        elif len(x.shape) == 3 and len(x_hat.shape) == 2:
+            x = rearrange(x, 'n t c -> (n t) c')
+        else:
+            assert x.shape == x_hat.shape, "Input and output shapes must match."
+        metric.update(x_hat.reshape(-1), x.reshape(-1))  # preds, target — both flattened to 1D
+
     # Potentially Add Frechet & Wasserstein
     def on_test_epoch_end(self):
         outputs = self._test_outputs
-        inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
-        rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        label = torch.cat([x["label"] for x in outputs], dim=0)
+        # inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
+        # rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
+        # label = torch.cat([x["label"] for x in outputs], dim=0)
 
         alive_features = self.test_dead_tracker.alive_features
         selectivity, selectivity_firing, class_size, class_size_firing = self.class_selectivity(
             codes_stats=[x["codes_stats"] for x in outputs], alive_features=alive_features.cpu()
         )
         self._test_outputs.clear()
-        rec_error = _compute_reconstruction_error(inputs, rec_inputs)
+        #rec_error = _compute_reconstruction_error(inputs, rec_inputs)
+        # self.log("test/r2", rec_error, prog_bar=True)
+        rec_error = self.test_r2.compute().item()
         self.log("test/r2", rec_error, prog_bar=True)
         self.log("test/class_selectivity", selectivity)
         self.log("test/class_selectivity_firing", selectivity_firing)
