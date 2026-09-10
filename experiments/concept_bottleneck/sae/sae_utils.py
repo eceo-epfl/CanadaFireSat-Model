@@ -8,6 +8,7 @@ from einops import rearrange
 from overcomplete.metrics import l1, r2_score
 from overcomplete.sae import SAE
 from overcomplete.sae.losses import _mse_with_penalty
+from tqdm import tqdm
 
 
 def mse_criterion(
@@ -440,3 +441,28 @@ def ghost_grad_loss(
     mse = mse.mean()
     loss = mse + l1_loss + mse_loss_ghost_resid
     return loss
+
+
+@torch.no_grad()
+def farthest_point_sample_indices(C: torch.Tensor, k: int) -> torch.Tensor:
+    """
+    Greedily pick k mutually-diverse row indices from C via farthest-point sampling
+    (cosine distance). Used to avoid initializing W's one-hot targets on the first
+    k rows of C, which can be spatially/semantically clustered (e.g. K-means output
+    ordering) and lead to duplicated/correlated dictionary atoms at init.
+    """
+    n_prime = C.shape[0]
+    device = C.device
+    C_normed = C / C.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+
+    chosen = torch.empty(k, dtype=torch.long, device=device)
+    chosen[0] = torch.randint(0, n_prime, (1,), device=device)
+    min_dist = 1.0 - (C_normed @ C_normed[chosen[0]])
+
+    for i in tqdm(range(1, k), total=k-1, desc="Sampling Farthest Points"):
+        next_idx = torch.argmax(min_dist)
+        chosen[i] = next_idx
+        new_dist = 1.0 - (C_normed @ C_normed[next_idx])
+        min_dist = torch.minimum(min_dist, new_dist)
+
+    return chosen

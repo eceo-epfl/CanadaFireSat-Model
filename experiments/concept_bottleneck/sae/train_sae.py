@@ -91,6 +91,25 @@ def train(cfg: DictConfig):
     if cfg.get("use_archetypical", False):
         sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
 
+        sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
+
+        opt_conf = sae.configure_optimizers()
+        # normalize whatever shape configure_optimizers() returns
+        if isinstance(opt_conf, (list, tuple)) and len(opt_conf) == 2:
+            opts, _ = opt_conf  # (optimizers, schedulers)
+        elif isinstance(opt_conf, (list, tuple)):
+            opts = opt_conf
+        else:
+            opts = [opt_conf]
+
+        tracked = any(
+            sae.net.dictionary.W is p
+            for opt in opts
+            for g in opt.param_groups
+            for p in g["params"]
+        )
+        print("New dictionary.W is tracked:", tracked)
+
     """
     elif cfg.get("use_class_init", False):
         X = np.load(cfg.get("train_npy_path"), mmap_mode="r")

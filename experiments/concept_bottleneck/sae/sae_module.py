@@ -7,6 +7,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from torch.utils.data import default_collate
 from omegaconf import OmegaConf
 from overcomplete.metrics import avg_l2_loss, hoyer, l0_eps
 from overcomplete.sae import (
@@ -20,7 +21,9 @@ from overcomplete.sae.train import _compute_reconstruction_error, extract_input
 from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
 from torchmetrics import R2Score
+from tqdm import tqdm
 
+from experiments.concept_bottleneck.sae.dataset import OnlineActivationDataset
 from experiments.concept_bottleneck.sae.metrics import (
     compute_coherence,
     compute_effective_rank,
@@ -28,6 +31,7 @@ from experiments.concept_bottleneck.sae.metrics import (
 )
 from experiments.concept_bottleneck.sae.sae_utils import (
     criterion_factory,
+    farthest_point_sample_indices,
     mse_criterion,
     optimizer_factory,
     scheduler_factory,
@@ -147,10 +151,16 @@ class plSAE(pl.LightningModule):
             **arch_kwargs,
         )
         self.net.dictionary = arch_dict
+        chosen_idx = farthest_point_sample_indices(self.net.dictionary.C, self.net.nb_concepts)
+        self.net.dictionary.W.data.zero_()
+        self.net.dictionary.W.data[
+            torch.arange(chosen_idx.shape[0], device=self.net.dictionary.device), chosen_idx
+        ] = 1.0
 
         if self.hparams.bind_init:
             self.net.encoder.final_block[0].weight.copy_(self.net.dictionary.get_dictionary())
             self.net.encoder.final_block[0].bias.zero_()
+
 
     def forward(
         self,
@@ -471,8 +481,112 @@ class plSAE(pl.LightningModule):
 
     @torch.no_grad()
     def _resample_dead_codes(self):
-        """Implements resampling of dead codes from
-        https://transformer-circuits.pub/2023/monosemantic-features/index.html#appendix-autoencoder-resampling"""
+        """Extension of the dead code resampling method to handle Relaxed Archetypal SAE."""
+
+        dm = self.trainer.datamodule
+        assert dm is not None, "Expected a LightningDataModule attached to the trainer."
+
+        dictionary = self.net.dictionary
+        assert hasattr(dictionary, "W") and hasattr(dictionary, "Relax") and hasattr(dictionary, "C"), \
+            "Expected a RelaxedArchetypalDictionary (with W, Relax, C) as self.net.dictionary"
+
+        dead_indices = torch.where(self.train_dead_tracker.alive_features == False)[0]
+        if len(dead_indices) == 0:
+            return
+
+        dataset = OnlineActivationDataset(dm.train_dataset)
+        sampled_indices = random.sample(range(len(dataset)), self.hparams.num_samples)
+        subset = Subset(dataset, sampled_indices)
+        subset_dataloader = DataLoader(subset, batch_size=self.hparams.resample_batch_size, shuffle=False)
+        mse_loss = criterion_factory(loss_type="mse", aggregate_batch=False)
+
+        tot_index_pairs = []  # list of (raw_dataset_idx, patch_position)
+        tot_loss = []
+        for i, raw_batch in tqdm(enumerate(subset_dataloader), total=len(subset_dataloader), desc="Resampling Dead Codes: Inferring Losses"):
+            transformed = dm.on_after_batch_transfer(raw_batch, 0)
+            x = extract_input(transformed)
+            z_pre, z, x_hat = self.net(x)
+
+            loss = mse_loss(x, x_hat, z_pre, z, self.net.get_dictionary())
+
+            batch_size = len(raw_batch["inputs"])  # or however you get B for this raw batch
+            n_tokens = loss.shape[0]
+            assert n_tokens % batch_size == 0, "Expected a fixed number of patches per sample"
+            P = n_tokens // batch_size
+            start = i * self.hparams.resample_batch_size
+            raw_idx_slice = sampled_indices[start:start + batch_size]
+
+            for raw_idx in raw_idx_slice:
+                for p in range(P):
+                    tot_index_pairs.append((raw_idx, p))
+            tot_loss.append(loss.pow(2).detach().cpu())
+
+        tot_loss = torch.cat(tot_loss, dim=0)
+        tot_probs = tot_loss / tot_loss.sum()
+
+        chosen_flat_indices = torch.multinomial(tot_probs, num_samples=len(dead_indices), replacement=False)
+        chosen_pairs = [tot_index_pairs[i] for i in chosen_flat_indices]
+        alive_norm = (
+            self.net.encoder.final_block[0].weight[self.train_dead_tracker.alive_features, :].norm(dim=1)
+        )  # Dimension should be n_concept, last_dimension
+        mean_alive_norm = alive_norm.mean()
+        target_norm = mean_alive_norm * 0.2
+
+        C = dictionary.C                                              # (n', d)
+        C_normed = C / C.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+        scale = torch.exp(dictionary.multiplier).item()
+
+        optimizer = self.optimizers()
+        if not isinstance(optimizer, torch.optim.Adam):
+            raise NotImplementedError("Specify reset for other optimizer types")
+
+        claimed = set()
+
+        for dead_idx, (raw_idx, patch_pos) in tqdm(zip(dead_indices, chosen_pairs), total=len(dead_indices), desc="Resampling Dead Codes: Updating Weights"):
+            raw_sample = dataset[raw_idx]
+            raw_batch_one = default_collate([raw_sample])
+            transformed = dm.on_after_batch_transfer(raw_batch_one, 0)
+            raw_input = extract_input(transformed)
+            sampled_input = raw_input[patch_pos, :].squeeze(0)
+            norm = sampled_input.norm(p=2).clamp_min(1e-8)
+            sampled_input = sampled_input / norm
+
+            sims = C_normed @ sampled_input
+            if claimed:
+                sims = sims.clone()
+                sims[list(claimed)] = -float("inf")
+            nearest_idx = torch.argmax(sims)
+            claimed.add(nearest_idx.item())
+            dictionary.W.data[dead_idx, :] = 0.0
+            dictionary.W.data[dead_idx, nearest_idx] = 1.0
+
+            target_atom = sampled_input / max(scale, 1e-8)
+            residual = target_atom - C[nearest_idx]
+            residual_norm = residual.norm(p=2).clamp_min(1e-8)
+            if residual_norm > dictionary.delta:
+                residual = residual * (dictionary.delta / residual_norm)
+            dictionary.Relax.data[dead_idx, :] = residual
+
+            self.net.encoder.final_block[0].weight[dead_idx, :] = sampled_input * target_norm
+            self.net.encoder.final_block[0].bias[dead_idx] = 0.0
+
+            for param, index in [
+                (dictionary.W, dead_idx),
+                (dictionary.Relax, dead_idx),
+                (self.net.encoder.final_block[0].weight, dead_idx),
+                (self.net.encoder.final_block[0].bias, dead_idx),
+            ]:
+                state = optimizer.state.get(param, {})
+                if state and "exp_avg" in state and "exp_avg_sq" in state:
+                    state["exp_avg"][index].zero_()
+                    state["exp_avg_sq"][index].zero_()
+
+
+    """
+    @torch.no_grad()
+    def _resample_dead_codes(self):
+        # Implements resampling of dead codes from
+        # https://transformer-circuits.pub/2023/monosemantic-features/index.html#appendix-autoencoder-resampling
 
         dead_indices = torch.where(self.train_dead_tracker.alive_features == False)[0]
         if len(dead_indices) == 0:
@@ -564,7 +678,7 @@ class plSAE(pl.LightningModule):
                             state["exp_avg"][index].zero_()
                             state["exp_avg_sq"][index].zero_()
             else:
-                raise NotImplementedError("Specify reset for other optimizer types")
+                raise NotImplementedError("Specify reset for other optimizer types")"""
 
     @torch.no_grad()
     def _initialize_encoder_from_decoder(self):
