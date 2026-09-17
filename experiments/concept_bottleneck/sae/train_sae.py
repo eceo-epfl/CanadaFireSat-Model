@@ -88,9 +88,8 @@ def train(cfg: DictConfig):
     log.info(f"Instantiating trainer <{cfg.trainer_sae._target_}>")
     trainer_sae: Trainer = hydra.utils.instantiate(cfg.trainer_sae, callbacks=callbacks, logger=logger)
 
+    """
     if cfg.get("use_archetypical", False):
-        sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
-
         sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
 
         opt_conf = sae.configure_optimizers()
@@ -108,7 +107,7 @@ def train(cfg: DictConfig):
             for g in opt.param_groups
             for p in g["params"]
         )
-        print("New dictionary.W is tracked:", tracked)
+        print("New dictionary.W is tracked:", tracked)"""
 
     """
     elif cfg.get("use_class_init", False):
@@ -125,7 +124,11 @@ def train(cfg: DictConfig):
     if cfg.get("test_only", False):
         log.info("Running in TEST ONLY mode...")
         log.info(f"Loading SAE checkpoint from {cfg.sae_ckpt_path}")
-        sae = plSAE.load_from_checkpoint(cfg.sae_ckpt_path)
+
+        ckpt = torch.load(cfg.sae_ckpt_path, map_location=device)
+        missing, unexpected = sae.load_state_dict(ckpt["state_dict"], strict=True)
+        log.info(f"Missing keys: {missing}")
+        log.info(f"Unexpected keys: {unexpected}")
         trainer_sae.test(model=sae, datamodule=sae_datamodule)
 
     else:

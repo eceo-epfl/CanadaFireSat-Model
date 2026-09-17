@@ -3,6 +3,7 @@ from typing import Optional, Tuple, Union
 import geopandas as gpd
 import numpy as np
 import torch
+from torchmetrics import Metric
 import torch.nn.functional as F
 from esda import Moran
 from libpysal.weights import DistanceBand
@@ -20,87 +21,6 @@ def _cosine_similarity_matrix(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     x_norm = F.normalize(x, p=2, dim=1)
     y_norm = F.normalize(y, p=2, dim=1)
     return x_norm @ y_norm.T
-
-
-def compute_binary_moran(lat: np.ndarray, lon: np.ndarray, active: np.ndarray, threshold_m: int = 500000) -> float:
-    """Compute Moran's I for binary 0/1 activations."""
-    lat = lat.reshape(-1)
-    lon = lon.reshape(-1)
-    if len(lat) < 2 or len(lon) < 2:
-        return np.nan
-    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(lon, lat), crs="EPSG:4326")
-    gdf = gdf.to_crs(epsg=3857)
-    gdf["active"] = active.astype(float)
-    w = DistanceBand.from_dataframe(gdf, threshold=threshold_m, silence_warnings=True)
-    mi = Moran(gdf["active"], w)
-    return mi.I
-
-
-def spherical_cartesian(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
-    lat = np.radians(lat)
-    lon = np.radians(lon)
-    R = 6371000
-    x = R * np.cos(lat) * np.cos(lon)
-    y = R * np.cos(lat) * np.sin(lon)
-    z = R * np.sin(lat)
-    coords = np.vstack([x, y, z]).T
-    return coords
-
-
-def compute_anni(lat: np.ndarray, lon: np.ndarray, label: np.ndarray = None, area: float = SEAS_AREA) -> float:
-
-    lat = lat.reshape(-1)
-    lon = lon.reshape(-1)
-    if len(lat) < 2 or len(lon) < 2:
-        if label is not None:
-            unique_labels = np.unique(label)
-            return np.nan, {class_id: np.nan for class_id in unique_labels}
-        return np.nan
-
-    coords = spherical_cartesian(lat, lon)
-
-    tree = cKDTree(coords)
-    dists, _ = tree.query(coords, k=2)  # Second Nearest as each coords is present in the dataset.
-    nn_distances = dists[:, 1]
-    mean_nn = nn_distances.mean()
-
-    n = len(coords)
-    density = n / area
-    expected_mean = 0.5 / np.sqrt(density)
-
-    anni = mean_nn / expected_mean
-
-    if label is not None:
-        class_score = {}
-        unique_labels = np.unique(label)
-        for lbl in unique_labels:
-            mask = np.squeeze(label == lbl)
-            masked_coords = coords[mask, :]
-
-            if len(masked_coords) < 2:
-                class_score[int(lbl)] = np.nan
-                continue
-
-            tree = cKDTree(masked_coords)
-            dists, _ = tree.query(masked_coords, k=2)  # Second Nearest as each coords is present in the dataset.
-            nn_distances = dists[:, 1]
-            mean_nn = nn_distances.mean()
-
-            n = len(masked_coords)
-            density = n / area
-            expected_mean = 0.5 / np.sqrt(density)
-            class_score[lbl.item()] = mean_nn / expected_mean
-
-        return anni, class_score
-
-    return anni
-
-
-@torch.no_grad()
-def compute_ood(codes_dict: torch.Tensor, activations: torch.Tensor) -> float:
-    cosine_matrix = _cosine_similarity_matrix(codes_dict, activations)
-    max_cosine_matrix, _ = torch.max(cosine_matrix, dim=1)
-    return 1 - max_cosine_matrix.mean().item()
 
 
 @torch.no_grad()
@@ -123,6 +43,13 @@ def compute_coherence(codes_dict: torch.Tensor) -> float:
     cosine_matrix = _cosine_similarity_matrix(codes_dict, codes_dict).abs()
     cosine_matrix = cosine_matrix.fill_diagonal_(-float("inf"))
     return cosine_matrix.max().item()
+
+
+@torch.no_grad()
+def compute_text_alignment(codes_dict: torch.Tensor, label_vocab_emb: torch.Tensor) -> float:
+    cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb).abs()
+    max_cosine_per_atom, _ = torch.max(cosine_matrix, dim=1)
+    return max_cosine_per_atom.mean().item()
 
 
 @torch.no_grad()
@@ -172,3 +99,31 @@ def compute_neg_interference(
         return torch.linalg.matrix_norm(product, ord=2).item(), class_score
 
     return torch.linalg.matrix_norm(product, ord=2).item()
+
+
+class OODMetric(Metric):
+    """For each dictionary atom, tracks max cosine similarity to any activation
+    seen so far across the epoch. compute() returns 1 - mean(per-atom max)."""
+    full_state_update = True  # state (per-atom max) must persist and be updated across batches
+
+    def __init__(self, nb_concepts: int, **kwargs):
+        super().__init__(**kwargs)
+        self.nb_concepts = nb_concepts
+        self.add_state(
+            "max_cosine",
+            default=torch.full((nb_concepts,), -1.0),
+            dist_reduce_fx="max",
+        )
+
+    def update(self, codes_dict: torch.Tensor, activations: torch.Tensor) -> None:
+        cosine_matrix = _cosine_similarity_matrix(codes_dict, activations)  # (n_dict, n_batch)
+        batch_max, _ = torch.max(cosine_matrix, dim=1)
+        self.max_cosine = torch.maximum(self.max_cosine, batch_max)
+
+    def compute(self, alive_features: Optional[torch.Tensor] = None) -> torch.Tensor:
+        max_cosine = self.max_cosine
+        if alive_features is not None:
+            max_cosine = max_cosine[alive_features]
+        if max_cosine.numel() == 0:
+            return torch.tensor(0.0, device=self.max_cosine.device)
+        return 1 - max_cosine.mean()

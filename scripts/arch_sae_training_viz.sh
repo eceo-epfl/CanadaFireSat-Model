@@ -5,11 +5,11 @@ export CUDA_VISIBLE_DEVICES=0
 export CUDA_LAUNCH_BLOCKING=1.
 
 max_epochs=20
-experiment="yake-10k-init-W-high-auxk-topk-40-4096-msclip-10x-ngram"
+experiment="viz-init-W-high-auxk-topk-40-4096-msclip-10x-ngram"
 nb_concepts=4096
 nb_k=40
 model_ckpt="MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
-sae="topk_arch"
+sae="topk_arch_viz"
 # use_archetypical=True
 
 python experiments/concept_bottleneck/sae/train_sae.py sae_max_epochs=${max_epochs} \

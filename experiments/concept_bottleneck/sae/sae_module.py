@@ -1,9 +1,12 @@
 import math
+import os
+from pathlib import Path
 import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from einops import rearrange
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -28,6 +31,8 @@ from experiments.concept_bottleneck.sae.metrics import (
     compute_coherence,
     compute_effective_rank,
     compute_stable_rank,
+    OODMetric,
+    compute_text_alignment,
 )
 from experiments.concept_bottleneck.sae.sae_utils import (
     criterion_factory,
@@ -38,6 +43,7 @@ from experiments.concept_bottleneck.sae.sae_utils import (
 )
 from experiments.concept_bottleneck.sae.trackers import DeadCodeTracker
 from experiments.concept_bottleneck.sae.utils import points_ext, points_vocab
+from msclip.inference.utils import build_model
 
 NAME_CLASS = {0: "No Fire", 1: "Fire"}
 
@@ -60,8 +66,12 @@ class plSAE(pl.LightningModule):
         geo_embed_dim: int = 256,
         sae_kwargs: Dict[str, Any] = {},
         criterion_kwargs: Dict[str, Any] = {},
-        dead_feature_window: int = 1000,
+       # dead_feature_window: int = 1000,
         name_class: Dict[str, int] = NAME_CLASS,
+        label_path: Optional[os.PathLike] = None,
+        text_enc_kwargs: Optional[Dict[str, Any]] = {},
+        text_batch_size: int = 128,
+        arch_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
         super().__init__()
@@ -108,7 +118,7 @@ class plSAE(pl.LightningModule):
             self.geonet = None
 
         self.geo_class = geo_class
-        self.train_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], dead_feature_window)
+        self.train_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], None)
         self.val_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], None)
         self.test_dead_tracker = DeadCodeTracker(self.net.get_dictionary().shape[0], None)
 
@@ -118,7 +128,15 @@ class plSAE(pl.LightningModule):
 
         self._val_outputs = []
         self._test_outputs = []
+        self.val_r2 = R2Score(num_outputs=1, multioutput="uniform_average")
         self.test_r2 = R2Score(num_outputs=1, multioutput="uniform_average")
+        self.val_r2_class = {class_id: R2Score(num_outputs=1, multioutput="uniform_average") for class_id in self.name_class.keys()}
+        self.test_r2_class = {class_id: R2Score(num_outputs=1, multioutput="uniform_average") for class_id in self.name_class.keys()}
+        self.val_ood = OODMetric(self.net.nb_concepts)
+        self.test_ood = OODMetric(self.net.nb_concepts)
+        self.text_enc_kwargs = text_enc_kwargs
+        self.text_batch_size = text_batch_size
+        self.set_vocab_emb(label_path=label_path, text_enc_kwargs=text_enc_kwargs, text_batch_size=text_batch_size)
 
     @staticmethod
     def sae_factory(sae_type: str, **sae_kwargs) -> nn.Module:
@@ -135,14 +153,49 @@ class plSAE(pl.LightningModule):
             raise NotImplementedError
 
     @torch.no_grad()
+    def set_vocab_emb(self, label_path: Optional[os.PathLike] = None,
+                      text_enc_kwargs: Optional[Dict[str, Any]] = {},
+                      text_batch_size: int = 128):
+        print("Setting VOCAB Device", self.device)
+        msclip_model, _, tokenizer = build_model(
+                device=self.device, **text_enc_kwargs
+        )
+        msclip_model.to(self.device).eval()
+
+        def batch_encode_text(texts: List[str], batch_size: int) -> torch.Tensor:
+            embs = []
+            for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+                batch = texts[i:i + batch_size]
+                toks = tokenizer(batch).to(msclip_model.device)
+                e = msclip_model.inference_text(toks)
+                # e = F.normalize(e, dim=-1) Attention: Normalization is not needed
+                embs.append(e.cpu())
+            return torch.cat(embs, dim=0)  # [N, D]
+
+        if label_path is not None:
+            label_vocab = pd.read_csv(label_path)["concept_closest"].tolist()
+
+        label_vocab_emb = batch_encode_text(label_vocab, text_batch_size)  # [P, D]
+        self.label_vocab_emb = label_vocab_emb.to(self.device)
+
+    @torch.no_grad()
     def set_arch(self, arch_kwargs: Dict[str, Any] = {}):
+        print("Setting Archetypal Dictionary Device", self.device)
         arch_kwargs = OmegaConf.to_container(arch_kwargs, resolve=True)
-        points = points_vocab(device=self.device, **arch_kwargs)
-        arch_kwargs.pop("csv_path", None)
-        arch_kwargs.pop("npy_path", None)
-        arch_kwargs.pop("vocab_size", None)
-        arch_kwargs.pop("test_batch_size", None)
-        arch_kwargs.pop("text_enc_kwargs", None)
+        if arch_kwargs.pop("points_from", None) == "vocab":
+            points = points_vocab(device=self.device, text_batch_size=self.text_batch_size,
+                                  text_enc_kwargs=self.text_enc_kwargs, **arch_kwargs)
+            arch_kwargs.pop("csv_path", None)
+            arch_kwargs.pop("npy_path", None)
+            arch_kwargs.pop("vocab_size", None)
+        else:
+            points = points_ext(dm=self.trainer.datamodule, **arch_kwargs)
+            arch_kwargs.pop("num_samples", None)
+            arch_kwargs.pop("img_batch_size", None)
+            arch_kwargs.pop("n_clusters", None)
+            arch_kwargs.pop("seed", None)
+
+        points = points.to(self.device)
         arch_dict = RelaxedArchetypalDictionary(
             in_dimensions=self.net.dictionary.in_dimensions,
             nb_concepts=self.net.nb_concepts,
@@ -160,6 +213,17 @@ class plSAE(pl.LightningModule):
         if self.hparams.bind_init:
             self.net.encoder.final_block[0].weight.copy_(self.net.dictionary.get_dictionary())
             self.net.encoder.final_block[0].bias.zero_()
+
+
+    def on_fit_start(self):
+        print("on_fit_start: Setting Archetypal Dictionary")
+        arch_kwargs = self.hparams.get("arch_kwargs", None)
+        if arch_kwargs is not None:
+            self.set_arch(arch_kwargs=arch_kwargs)
+            # Parameters changed (dictionary swapped) -> optimizer built in
+            # configure_optimizers() is now stale. Rebuild it against the
+            # current self.parameters().
+            self.trainer.strategy.setup_optimizers(self.trainer)
 
 
     def forward(
@@ -302,6 +366,10 @@ class plSAE(pl.LightningModule):
         self.val_dead_tracker.alive_features = torch.zeros(
             self.net.get_dictionary().shape[0], dtype=torch.bool, device=self.device
         )
+        self.val_r2.reset()
+        for _, r2_metric in self.val_r2_class.items():
+            r2_metric.reset()
+        self.val_ood.reset()
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> Dict[str, torch.Tensor]:
         loss, _, codes, inputs, rec_inputs, _, mse = self.step(
@@ -335,11 +403,14 @@ class plSAE(pl.LightningModule):
         self.log("val/l0", sparsity_error, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/l2", avg_l2_loss(inputs, rec_inputs), on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/hoyer", hoyer_error, on_step=False, on_epoch=True, prog_bar=True)
+        self._update_r2(self.val_r2, inputs, rec_inputs)
+        self._update_r2_class(self.val_r2_class, inputs, rec_inputs, label)
+        self._update_ood(self.val_ood, inputs)
         self._val_outputs.append(
             {
                 "loss": loss,
-                "inputs": inputs.detach().cpu(),
-                "rec_inputs": rec_inputs.detach().cpu(),
+                # "inputs": inputs.detach().cpu(),
+                # "rec_inputs": rec_inputs.detach().cpu(),
                 # "label": batch["label"].detach().cpu(),
                 "codes_stats": codes_stats,
             }
@@ -349,8 +420,8 @@ class plSAE(pl.LightningModule):
     # Potentially Add Frechet & Wasserstein
     def on_validation_epoch_end(self):
         outputs = self._val_outputs
-        inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
-        rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
+        # inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
+        # rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
         # label = torch.cat([x["label"] for x in outputs], dim=0)
 
         alive_features = self.val_dead_tracker.alive_features
@@ -358,8 +429,12 @@ class plSAE(pl.LightningModule):
             codes_stats=[x["codes_stats"] for x in outputs], alive_features=alive_features.cpu()
         )
         self._val_outputs.clear()
-        rec_error = _compute_reconstruction_error(inputs, rec_inputs)
+        # rec_error = _compute_reconstruction_error(inputs, rec_inputs)
+        rec_error = self.val_r2.compute().item()
         self.log("val/r2", rec_error, prog_bar=True)
+        for class_id, r2_metric in self.val_r2_class.items():
+            class_r2 = r2_metric.compute().item()
+            self.log(f"val/r2_class_{self.name_class[class_id]}", class_r2, prog_bar=False)
         self.log("val/class_selectivity", selectivity)
         self.log("val/class_selectivity_firing", selectivity_firing)
 
@@ -378,15 +453,25 @@ class plSAE(pl.LightningModule):
         stable_rank = compute_stable_rank(self.net.get_dictionary()[alive_features].detach())
         eff_rank = compute_effective_rank(self.net.get_dictionary()[alive_features].detach())
         coherence = compute_coherence(self.net.get_dictionary()[alive_features].detach())
+        ood_score = self.val_ood.compute(alive_features=alive_features).item()
         self.log("val/stable_rank", stable_rank)
         self.log("val/eff_rank", eff_rank)
         self.log("val/coherence", coherence)
+        self.log("val/ood_score", ood_score)
+
+        if self.label_vocab_emb is not None:
+            self.label_vocab_emb = self.label_vocab_emb.to(self.device)
+            text_cosine = compute_text_alignment(self.net.get_dictionary()[alive_features].detach(), self.label_vocab_emb.detach())
+            self.log("val/text_cosine", text_cosine)
 
     def on_test_epoch_start(self):
         self.test_dead_tracker.alive_features = torch.zeros(
             self.net.get_dictionary().shape[0], dtype=torch.bool, device=self.device
         )
         self.test_r2.reset()
+        for _, r2_metric in self.test_r2_class.items():
+            r2_metric.reset()
+        self.test_ood.reset()
 
     def test_step(self, batch: Dict[str, Any], batch_idx: int) -> Dict[str, torch.Tensor]:
         loss, _, codes, inputs, rec_inputs, _, mse = self.step(
@@ -421,6 +506,8 @@ class plSAE(pl.LightningModule):
         self.log("test/l2", avg_l2_loss(inputs, rec_inputs), on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/hoyer", hoyer_error, on_step=False, on_epoch=True, prog_bar=True)
         self._update_r2(self.test_r2, inputs, rec_inputs)
+        self._update_r2_class(self.test_r2_class, inputs, rec_inputs, label)
+        self._update_ood(self.test_ood, inputs)
         self._test_outputs.append(
             {
                 "loss": loss,
@@ -443,22 +530,41 @@ class plSAE(pl.LightningModule):
             assert x.shape == x_hat.shape, "Input and output shapes must match."
         metric.update(x_hat.reshape(-1), x.reshape(-1))  # preds, target — both flattened to 1D
 
+    def _update_r2_class(self, dict_metric, x, x_hat, label):
+        x, x_hat, label = x.detach().cpu(), x_hat.detach().cpu(), label.detach().cpu()
+        if len(x.shape) == 4 and len(x_hat.shape) == 2:
+            x = rearrange(x, 'n c w h -> (n w h) c')
+            label = rearrange(label, 'n -> (n)')
+        elif len(x.shape) == 3 and len(x_hat.shape) == 2:
+            x = rearrange(x, 'n t c -> (n t) c')
+            label = rearrange(label, 'n -> (n)')
+        else:
+            assert x.shape == x_hat.shape, "Input and output shapes must match."
+        for class_id in torch.unique(label):
+            class_mask = (label == class_id)
+            dict_metric[class_id.item()].update(x_hat[class_mask].reshape(-1), x[class_mask].reshape(-1))  # preds, target — both flattened to 1D
+
+    def _update_ood(self, metric, x):
+        x = x.detach()
+        if len(x.shape) == 4:
+            x = rearrange(x, 'n c w h -> (n w h) c')
+        elif len(x.shape) == 3:
+            x = rearrange(x, 'n t c -> (n t) c')
+        metric.update(self.net.get_dictionary(), x)
+
     # Potentially Add Frechet & Wasserstein
     def on_test_epoch_end(self):
         outputs = self._test_outputs
-        # inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
-        # rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        # label = torch.cat([x["label"] for x in outputs], dim=0)
-
         alive_features = self.test_dead_tracker.alive_features
         selectivity, selectivity_firing, class_size, class_size_firing = self.class_selectivity(
             codes_stats=[x["codes_stats"] for x in outputs], alive_features=alive_features.cpu()
         )
         self._test_outputs.clear()
-        #rec_error = _compute_reconstruction_error(inputs, rec_inputs)
-        # self.log("test/r2", rec_error, prog_bar=True)
         rec_error = self.test_r2.compute().item()
         self.log("test/r2", rec_error, prog_bar=True)
+        for class_id, r2_metric in self.test_r2_class.items():
+            class_r2 = r2_metric.compute().item()
+            self.log(f"test/r2_class_{self.name_class[class_id]}", class_r2, prog_bar=False)
         self.log("test/class_selectivity", selectivity)
         self.log("test/class_selectivity_firing", selectivity_firing)
 
@@ -475,9 +581,17 @@ class plSAE(pl.LightningModule):
         stable_rank = compute_stable_rank(self.net.get_dictionary()[alive_features].detach())
         eff_rank = compute_effective_rank(self.net.get_dictionary()[alive_features].detach())
         coherence = compute_coherence(self.net.get_dictionary()[alive_features].detach())
+        ood_score = self.test_ood.compute(alive_features=alive_features).item()
         self.log("test/stable_rank", stable_rank)
         self.log("test/eff_rank", eff_rank)
         self.log("test/coherence", coherence)
+        self.log("test/ood_score", ood_score)
+
+        if self.label_vocab_emb is not None:
+            self.label_vocab_emb = self.label_vocab_emb.to(self.device)
+            text_cosine = compute_text_alignment(self.net.get_dictionary()[alive_features].detach(), self.label_vocab_emb.detach())
+            self.log("test/text_cosine", text_cosine)
+
 
     @torch.no_grad()
     def _resample_dead_codes(self):

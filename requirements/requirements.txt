@@ -79,6 +79,7 @@ spacy
 git+https://github.com/boudinfl/pke.git
 fastkmeans
 overcomplete
+umap-learn
 
 # FWI baseline
 rasterio

@@ -5,7 +5,7 @@ defaults:
 
 concept_df_path: "./results/DictionnaryWordsGeneral/pke_yake_general_f1k2n3max1500000parserFalse_homogeneous.csv"
 msclip_batch_size: 128
-n_cluster: 10000
+n_cluster: 50000
 cluster_type: "torch"
 cluster_params:
   max_iter: 300

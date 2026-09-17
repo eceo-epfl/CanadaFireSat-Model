@@ -20,7 +20,7 @@ from src.data import get_data
 from experiments.concept_bottleneck.eval.utils import compute_image_entropy_normalized, log_metrics, bimodality_coefficient, babel_function
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="eval_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="eval_concept")
 def compute_text_patch_metrics(cfg: DictConfig):
 
     cfg = OmegaConf.to_container(cfg, resolve=True)
@@ -122,11 +122,19 @@ def compute_text_patch_metrics(cfg: DictConfig):
         # Extract Batch & Forward Pass
         with torch.no_grad():
             sample = data[0]
-            # img_name_info = data[1]
             patch_embed = model.model.encode_patches(sample["inputs"].unsqueeze(0).to(device), use_temp=cfg["use_temp"],
-                                                     doy=sample["doy"].unsqueeze(0).to(device), seq_len=sample["seq_lengths"]) # [1, T, P, D]
+                                                     doy=sample["doy"].unsqueeze(0).to(device),
+                                                     seq_len=torch.tensor(sample["seq_lengths"]).unsqueeze(0).to(device)) # [1, T, P, D]
             patch_embed = patch_embed.squeeze(0).cpu() # [T, P, D]
             patch_embed = F.normalize(patch_embed, dim=-1)
+
+            if patch_embed.dim() == 2:
+                patch_embed = patch_embed.unsqueeze(0)  # [P, D] -> [1, P, D]
+            elif patch_embed.dim() != 3:
+                raise ValueError(
+                    f"Expected patch_embed of shape [P, D] or [T, P, D] after squeeze(0), "
+                    f"got shape {tuple(patch_embed.shape)}"
+                )
 
         # Compute similarity between patch embeddings and concept embeddings
         # Reshape patch_embed to [T*P, D] for matrix multiplication
