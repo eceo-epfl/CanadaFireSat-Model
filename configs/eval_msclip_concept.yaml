@@ -3,8 +3,8 @@ defaults:
   - global_config
 
 
-concept_path: "./results/DictionnaryWordsGeneral/spacy_msclip_general_f1k2n3max1500000parserFalse_homogeneous_50000_centroids.npy"
-concept_ext:  "cluster" #"freq"
+concept_path: "./results/DictionnaryWordsGeneral/canada_sentinel2_openai_vocabulary.csv"
+concept_ext:  "all" #"freq"
 dict_size:
 use_temp: True
 batch_size_text: 128

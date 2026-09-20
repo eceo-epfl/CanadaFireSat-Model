@@ -97,6 +97,11 @@ def compute_text_patch_metrics(cfg: DictConfig):
         concept_df = pd.read_csv(cfg["concept_path"]).sort_values("frequency", ascending=False)
         concept_list = concept_df["concept"].tolist()[:cfg["dict_size"]]
         concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
+    if cfg["concept_ext"] == "all":
+        output_name = Path(cfg["concept_path"]).stem
+        concept_df = pd.read_csv(cfg["concept_path"])
+        concept_list = concept_df["concept"].tolist()
+        concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
     else:
         output_name = Path(cfg["concept_path"]).stem
         concept_embed = np.load(cfg["concept_path"]) # TODO: Potentially use the label here and not the centroid vector.

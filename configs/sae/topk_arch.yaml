@@ -7,7 +7,7 @@ num_samples: 20000
 resample_every_n_epochs: 100 # 100 Equivalent to NO resampling or 1 for resampling at each epoch
 resample_batch_size: 32
 bind_init: True
-label_path: "${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous_10000_centroids_label.csv"
+label_path: "${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids_label.csv"
 text_enc_kwargs:
     model_name: Llama3-MS-CLIP-Base
     pretrained: True
@@ -28,6 +28,6 @@ criterion_kwargs:
 arch_kwargs:
   points_from: "vocab"
   csv_path: null #"${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous.csv"
-  npy_path: "${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous_10000_centroids.npy" #"${paths.dict_path}/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy"
-  delta: 1.
+  npy_path: "${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy" #"${paths.dict_path}/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy"
+  delta: 0.5
   use_multiplier: True
