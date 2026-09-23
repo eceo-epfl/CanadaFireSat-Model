@@ -76,6 +76,7 @@ Jinja2
 segmentation-models-pytorch
 datasets
 spacy
+nltk
 git+https://github.com/boudinfl/pke.git
 fastkmeans
 overcomplete
@@ -90,3 +91,7 @@ esda
 libpysal
 pyrootutils
 imbalanced-learn
+
+# Plot Specific Libraries
+plotly
+adjustText

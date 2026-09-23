@@ -17,24 +17,9 @@ import spacy
 import pke
 from huggingface_hub import hf_hub_download, list_repo_files
 
+from experiments.concept_bottleneck.extract_utils import postprocess_terms, normalize_label_str
 from msclip.inference.utils import build_model
 from src.constants import CONFIG_PATH
-
-# ----------------------------------------------------------------------
-# Label utilities: normalization + simple filters
-# ----------------------------------------------------------------------
-
-GENERIC_LABELS = {
-    "area", "areas", "region", "regions", "zone", "zones",
-    "image", "images", "scene", "scenes", "view", "views",
-    "satellite image", "satellite view", "satellite imagery",
-    "landscape", "landscape scene",
-}
-
-COLOR_WORDS = {
-    "brown", "blue", "green", "black", "white", "grey", "gray",
-    "red", "yellow", "orange",
-}
 
 from collections import Counter
 from multiprocessing import Pool, cpu_count
@@ -53,28 +38,6 @@ _EXTRACTOR = None
 _EXTRACTOR_TYPE = None
 _MAX_NGRAM = None
 _TOP_K = None
-
-
-def normalize_label_str(s: str) -> str:
-    s = s.strip().lower()
-    s = " ".join(s.split())
-    for art in ("the ", "a ", "an "):
-        if s.startswith(art):
-            s = s[len(art):]
-    return s
-
-
-def is_bad_label(s: str) -> bool:
-    s = normalize_label_str(s)
-    if not s:
-        return True
-    if s in GENERIC_LABELS:
-        return True
-    if s in COLOR_WORDS:
-        return True
-    if len(s) <= 2:
-        return True
-    return False
 
 # ------------------------------------------------------------------------------
 # Download sentences (parquet captions) from the SSL4EO dataset on HuggingFace
@@ -210,10 +173,10 @@ def build_term_vocab_spacy(
     n_process: int = 1,
     msclip_batch_size: int = 512,
     use_parser: bool = False,
-) -> Tuple[List[str], List[int]]:
+) -> Tuple[List[str], List[int], List[float]]:
 
     print(f"[INFO] Loading spaCy model (n_process={n_process})...")
-    nlp = spacy.load("en_core_web_sm", disable=["ner"])
+    nlp = spacy.load("en_core_web_sm")
 
     # ------------------------------------------------------------------
     # Pass 1: spaCy extraction — collect per-sentence candidates
@@ -223,8 +186,6 @@ def build_term_vocab_spacy(
 
     chunk_count = 0
     filter_count = 0
-    lemmas_count = 0
-    is_bad_count = 0
     tot_chunk = []
     tot_crop_chunk = []
 
@@ -242,60 +203,35 @@ def build_term_vocab_spacy(
                     chunk = chunk[len(chunk)-max_ngram:]
                     tot_crop_chunk.append(chunk)
 
-                filtered = [t for t in chunk if t.is_alpha and not t.is_stop and t.pos_ in {"NOUN", "ADJ"}]
-
+                filtered = [normalize_label_str(phrase) for phrase, _ in postprocess_terms([chunk], None, nlp)]
                 if not filtered:
                     filter_count += 1
                     continue
-
-                # Lemma deduplication within span
-                lemmas = [t.lemma_.lower() for t in filtered]
-                if len(set(lemmas)) != len(lemmas):
-                    lemmas_count += 1
-                    continue
-
-                phrase = normalize_label_str(" ".join(t.lemma_ for t in filtered))
-                if not is_bad_label(phrase):
-                    candidate_phrases.append(phrase)
-                else:
-                    is_bad_count += 1
+                candidate_phrases.extend(filtered)
 
         else:
             ### Original Louis' implementation: n-grams of content words (NOUN/ADJ), no parsing ###
-            content_toks = [
-                tok for tok in doc
-                if tok.is_alpha
-                and not tok.is_stop
-                and tok.pos_ in {"NOUN", "ADJ"}
-            ]
+            content_terms = postprocess_terms([doc], None, nlp)
+            if not content_terms:
+                continue
 
+            content_terms = content_terms[0][0]
+            content_terms = content_terms.split(" ")
             candidate_phrases: List[str] = []
             for n in range(1, max_ngram + 1):
-                if len(content_toks) < n:
+                if len(content_terms) < n:
                     continue
-                for i in range(len(content_toks) - n + 1):
-                    span = content_toks[i:i + n]
-                    head = span[-1]
-
-                    lemmas = [t.lemma_.lower() for t in span]
-                    if len(set(lemmas)) != len(lemmas):
-                        continue
-                    if head.pos_ not in {"NOUN"}:
-                        continue
-
-                    phrase = normalize_label_str(" ".join(t.lemma_ for t in span))
-                    if is_bad_label(phrase):
-                        continue
-                    if not any(t.pos_ in {"NOUN"} for t in span):
-                        continue
-
+                for i in range(len(content_terms) - n + 1):
+                    span = content_terms[i:i + n]
+                    phrase = normalize_label_str(" ".join(t for t in span))
                     candidate_phrases.append(phrase)
 
         if candidate_phrases:
             per_sentence.append((sent, candidate_phrases))
 
     counts: Counter = Counter()
-    print(f"Total Chunks: {chunk_count}, Filtered: {filter_count}, Lemma Duplicates: {lemmas_count}, Bad Labels: {is_bad_count}")
+    cosine_sums: Counter = Counter()
+    print(f"Total Chunks: {chunk_count}, Filtered: {filter_count}")
     print(f"[INFO] Extracted candidates for {len(per_sentence)} sentences.")
     print(f"[INFO] Number of total candidates across all sentences: {sum(len(cands) for _, cands in per_sentence)}")
     print(f"[INFO] Number of unique candidate phrases across all sentences: {len(set(p for _, cands in per_sentence for p in cands))}")
@@ -312,6 +248,9 @@ def build_term_vocab_spacy(
         for _, candidates in per_sentence:
             for p in candidates:
                 counts[p] += 1
+
+        items = [(p, c, 0.) for p, c in counts.items() if c >= min_freq]
+        items.sort(key=lambda x: -x[1])
 
     else:
         # ------------------------------------------------------------------
@@ -365,48 +304,27 @@ def build_term_vocab_spacy(
                 top_local  = torch.topk(sims[mask], k=k_n).indices
                 top_global = mask[top_local].tolist()
                 for j in top_global:
+                    similarity = sims[j].item()
+                    cosine_sums[candidates[j]] += similarity
                     counts[candidates[j]] += 1
 
+        items = [(phrase, counts[phrase], cosine_sums[phrase])
+                    for phrase in counts
+                    if counts[phrase] >= min_freq
+                ]
+        items.sort(key=lambda x: -x[2])
 
-    freqs = np.array(list(counts.values()))
-    print(f"Total unique phrases before min_freq: {len(freqs)}")
-    print(f"Phrases appearing >= 5 times:   {(freqs >= 5).sum()}")
-    print(f"Phrases appearing >= 50 times:  {(freqs >= 50).sum()}")
-    print(f"Phrases appearing >= 500 times: {(freqs >= 500).sum()}")
-    print(f"Median frequency: {np.median(freqs):.0f}")
-    print(f"Mean frequency:   {np.mean(freqs):.0f}")
-    print(f"Max frequency:    {np.max(freqs):.0f}")
-
-    items_sorted = sorted(counts.items(), key=lambda x: -x[1])
-    n = len(items_sorted)
-
-    print("Top 20 most frequent:")
-    for phrase, count in items_sorted[:20]:
-        print(f"  {count:6d}  {phrase}")
-
-    print("\n20 from middle of distribution:")
-    for phrase, count in items_sorted[n//2 - 10: n//2 + 10]:
-        print(f"  {count:6d}  {phrase}")
-
-    print("\n20 least frequent (just above min_freq):")
-    for phrase, count in items_sorted[-20:]:
-        print(f"  {count:6d}  {phrase}")
-
-    # ------------------------------------------------------------------
-    # Frequency filtering + sorting
-    # ------------------------------------------------------------------
-    items = [(p, c) for p, c in counts.items() if c >= min_freq]
-    items.sort(key=lambda x: -x[1])
 
     if max_terms is not None and len(items) > max_terms:
         print("CAREFULLLLLLLL Cropped list")
         items = items[:max_terms]
 
-    terms = [p for p, _ in items]
-    freqs = [f for _, f in items]
+    terms = [p for p, _, _ in items]
+    freqs = [f for _, f, _ in items]
+    similarities = [s for _, _, s in items]
     print(f"[INFO] Built spaCy term vocabulary of size {len(terms)} "
           f"(min_freq={min_freq}).")
-    return terms, freqs
+    return terms, freqs, similarities
 
 
 def _init_worker(
@@ -465,15 +383,7 @@ def _process_sentence(sent: str):
             if len(words) > _MAX_NGRAM:
                 phrase = " ".join(words[-_MAX_NGRAM:])
 
-            if is_bad_label(phrase):
-                continue
-
-            candidate_phrases.append(
-                normalize_label_str(phrase)
-            )
-
-        if not candidate_phrases:
-            return None
+            candidate_phrases.append(phrase)
 
         return candidate_phrases
 
@@ -548,6 +458,19 @@ def keyphrase_extraction(
     terms = [phrase for phrase, _ in items]
     freqs = [freq for _, freq in items]
 
+    nlp = spacy.load(
+        "en_core_web_sm"
+    )
+
+    filtered = postprocess_terms(
+        terms,
+        freqs,
+        nlp
+    )
+
+    terms = [phrase for phrase, _ in filtered]
+    freqs = [freq for _, freq in filtered]
+
     print(
         f"[INFO] Built PKE term vocabulary "
         f"of size {len(terms)} "
@@ -557,7 +480,7 @@ def keyphrase_extraction(
     return terms, freqs
 
 
-@hydra.main(version_base=None, config_path=str(CONFIG_PATH / "concept_bottleneck"), config_name="extract_concept")
+@hydra.main(version_base=None, config_path=str(CONFIG_PATH), config_name="extract_concept")
 def extract_concepts(cfg: DictConfig):
 
     if cfg.download_captions:
@@ -582,7 +505,7 @@ def extract_concepts(cfg: DictConfig):
     if cfg.method_type == "spacy":
 
         # --------- Build term vocabulary BEFORE k-means ----------
-        terms, freqs = build_term_vocab_spacy(
+        terms, freqs, similarities = build_term_vocab_spacy(
             sentences,
             model=msclip_model,
             tokenizer=tokenizer,
@@ -607,6 +530,7 @@ def extract_concepts(cfg: DictConfig):
             top_k_per_sentence=cfg.top_k_per_sentence,
         )
         out_stub = f"pke_{cfg.pke_extractor.lower()}"
+        similarities = [0.0] * len(terms)
 
     else:
         raise NotImplementedError()
@@ -618,7 +542,8 @@ def extract_concepts(cfg: DictConfig):
 
     df = pd.DataFrame({
         "concept": terms,
-        "frequency": freqs
+        "frequency": freqs,
+        "similarities": similarities
     })
 
     df.to_csv(out_path, index=False)

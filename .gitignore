@@ -130,6 +130,7 @@ celerybeat.pid
 env/
 venv/
 fire-env/
+apertus-env/
 ENV/
 env.bak/
 venv.bak/

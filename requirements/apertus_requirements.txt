@@ -1,0 +1,8 @@
+-e external/ms_clip
+
+torch==2.5.1
+torchvision==0.20.1
+transformers>=4.56.0
+accelerate
+huggingface_hub
+pandas
