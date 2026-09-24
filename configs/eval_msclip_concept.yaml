@@ -3,10 +3,10 @@ defaults:
   - global_config
 
 
-concept_path: "./results/DictionnaryWordsGeneral/canada_sentinel2_openai_vocabulary.csv"
-concept_ext:  "all" #"freq"
+concept_path: "./results/DictionnaryWordsGeneral/pke_yake_general_f1k2n3max1500000parserFalse_homogeneous_10000_labels.npy"
+concept_ext:  "cluster" #"freq"
 dict_size:
-use_temp: True
+use_temp: False
 batch_size_text: 128
 threshold_patch: 0.5
 threshold_disc: 0.05

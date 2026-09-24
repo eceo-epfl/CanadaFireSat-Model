@@ -136,7 +136,12 @@ class plSAE(pl.LightningModule):
         self.test_ood = OODMetric(self.net.nb_concepts)
         self.text_enc_kwargs = text_enc_kwargs
         self.text_batch_size = text_batch_size
-        self.set_vocab_emb(label_path=label_path, text_enc_kwargs=text_enc_kwargs, text_batch_size=text_batch_size)
+        if label_path is not None:
+            label_vocab_emb = np.load(label_path)
+            label_vocab_emb = torch.from_numpy(label_vocab_emb)
+            self.label_vocab_emb = label_vocab_emb.to(self.device)
+        else:
+            self.label_vocab_emb = None
 
     @staticmethod
     def sae_factory(sae_type: str, **sae_kwargs) -> nn.Module:
@@ -152,31 +157,6 @@ class plSAE(pl.LightningModule):
         else:
             raise NotImplementedError
 
-    @torch.no_grad()
-    def set_vocab_emb(self, label_path: Optional[os.PathLike] = None,
-                      text_enc_kwargs: Optional[Dict[str, Any]] = {},
-                      text_batch_size: int = 128):
-        print("Setting VOCAB Device", self.device)
-        msclip_model, _, tokenizer = build_model(
-                device=self.device, **text_enc_kwargs
-        )
-        msclip_model.to(self.device).eval()
-
-        def batch_encode_text(texts: List[str], batch_size: int) -> torch.Tensor:
-            embs = []
-            for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
-                batch = texts[i:i + batch_size]
-                toks = tokenizer(batch).to(msclip_model.device)
-                e = msclip_model.inference_text(toks)
-                # e = F.normalize(e, dim=-1) Attention: Normalization is not needed
-                embs.append(e.cpu())
-            return torch.cat(embs, dim=0)  # [N, D]
-
-        if label_path is not None:
-            label_vocab = pd.read_csv(label_path)["concept_closest"].tolist()
-
-        label_vocab_emb = batch_encode_text(label_vocab, text_batch_size)  # [P, D]
-        self.label_vocab_emb = label_vocab_emb.to(self.device)
 
     @torch.no_grad()
     def set_arch(self, arch_kwargs: Dict[str, Any] = {}):

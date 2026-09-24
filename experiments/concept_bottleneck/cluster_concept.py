@@ -28,7 +28,7 @@ def minibatch_kmeans(
         kmeans = FastKMeans(
             d=X.shape[1],
             k=kwargs.get("n_cluster"),
-            tol=1e-4,
+            tol=1e-5,
             niter=kwargs.get("max_iter"),
             seed=kwargs.get("seed"),
             verbose=True,
@@ -53,25 +53,13 @@ def minibatch_kmeans(
         return torch.from_numpy(clusters), torch.from_numpy(cluster_ids)
 
 
-def DEPRECATED_label_centroids_nearest(
-    centroid: torch.Tensor,      # [n_clusters, D]
-    dict_emb: torch.Tensor,      # [n_atoms, D] normalized
-    dict_atom: List[str],        # [n_atoms] original phrases
-) -> Tuple[List[str], np.ndarray]:
-    centroids_norm = F.normalize(centroid, dim=-1)
-    sim = centroids_norm @ dict_emb.T  # [n_clusters, n_atoms]
-    nearest_idx = sim.argmax(dim=1)     # [n_clusters]
-    label = [dict_atom[i] for i in nearest_idx.tolist()]
-    return label, sim.max(dim=1).numpy()
-
-
 def label_centroids_nearest(
     centroid: torch.Tensor,      # [n_clusters, D]
     dict_emb: torch.Tensor,      # [n_atoms, D] normalized
     dict_atom: List[str],        # [n_atoms] original phrases
     chunk_size: int = 2000,      # process this many centroids at a time
     device: str = "cuda",
-) -> Tuple[List[str], np.ndarray]:
+) -> Tuple[List[str], np.ndarray, np.ndarray]:
 
     centroids_norm = F.normalize(centroid, dim=-1).to(device)  # [n_clusters, D]
     dict_emb_norm  = F.normalize(dict_emb, dim=-1).to(device)  # [n_atoms, D]
@@ -97,8 +85,10 @@ def label_centroids_nearest(
     nearest_idx_all = torch.cat(nearest_idx_all)          # [n_clusters]
     max_sim_all = torch.cat(max_sim_all).numpy()          # [n_clusters]
 
+    nearest_idx_all = torch.unique(nearest_idx_all)
     labels = [dict_atom[i] for i in nearest_idx_all.tolist()]
-    return labels, max_sim_all
+    labels_emb = dict_emb[nearest_idx_all].numpy()  # [n_clusters, D]
+    return labels, labels_emb, max_sim_all
 
 
 def label_centroids_by_frequency(
@@ -198,6 +188,13 @@ def cluster_concept(cfg: DictConfig):
 
     dict_emb = batch_encode_text(dict_atom, cfg.msclip_batch_size)  # [P, D]
 
+    if cfg.flag_encode_only == True:
+        assert np.unique(dict_atom).size == len(dict_atom), "Duplicate atoms found in the input concept file. Please remove duplicates before encoding."
+        Path(cfg.output_dir).mkdir(exist_ok=True)
+        np.save(Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f"_vocab_embeddings.npy"), dict_emb.numpy())
+        print(f"[INFO] Saved {len(dict_atom)} embeddings to {Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f'_embeddings.npy')}")
+        return
+
     assert cfg.n_cluster < len(dict_atom), f"Number of clusters {cfg.n_cluster} for the number of atoms {len(dict_atom)}"
     centroid_emb, cluster_labels = minibatch_kmeans(dict_emb.cpu().numpy(), method=cfg.cluster_type, n_cluster=cfg.n_cluster,
                                                     **cfg.cluster_params)
@@ -205,7 +202,9 @@ def cluster_concept(cfg: DictConfig):
     np.save(Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f"_{cfg.n_cluster}_centroids.npy"), centroid_emb.numpy())
 
 
-    closest_label_centroid, distances_rep = label_centroids_nearest(centroid_emb, dict_emb, dict_atom)
+    closest_label_centroid, closest_label_emb, distances_rep = label_centroids_nearest(centroid_emb, dict_emb, dict_atom)
+    np.save(Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f"_{cfg.n_cluster}_labels.npy"), closest_label_emb)
+    duplicate_count = cfg.n_cluster - len(closest_label_centroid)
     freq_label_centroid = label_centroids_by_frequency(cluster_labels.numpy(), dict_atom,  dict_freq, cfg.n_cluster)
 
     sil_score = compute_simplified_silhouette(dict_emb, centroid_emb, cluster_labels, chunk_size=5000) # TODO: Double check code and merge with label centroids.
@@ -220,8 +219,9 @@ def cluster_concept(cfg: DictConfig):
     for k, v in dist_summary.items():
         print(f"  {k:<40s} {v:.4f}")
 
-    df = pd.DataFrame({"concept_closest": closest_label_centroid,
-                       "concept_most_frequent": freq_label_centroid})
+    #df = pd.DataFrame({"concept_closest": closest_label_centroid,
+    #                   "concept_most_frequent": freq_label_centroid})
+    df = pd.DataFrame({"concept_closest": closest_label_centroid,})
     df.to_csv(Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f"_{cfg.n_cluster}_centroids_label.csv"), index=False)
     print(f"[INFO] Saved {len(df)} concepts to {Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f'_{cfg.n_cluster}_centroids_label.csv')}")
 
@@ -233,6 +233,7 @@ def cluster_concept(cfg: DictConfig):
         f.write(f"n_clusters:     {cfg.n_cluster}\n")
         f.write(f"n_atoms:        {len(dict_atom)}\n")
         f.write(f"cluster method: {cfg.cluster_type}\n\n")
+        f.write(f"n_duplicate_centroids: {duplicate_count}\n\n")
 
         f.write("--- Distance to Assigned Representative & Silhouette ---\n")
         for k, v in dist_summary.items():
