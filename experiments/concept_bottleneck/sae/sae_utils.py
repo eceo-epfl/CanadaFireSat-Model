@@ -9,6 +9,7 @@ from overcomplete.metrics import l1, r2_score
 from overcomplete.sae import SAE
 from overcomplete.sae.losses import _mse_with_penalty
 from tqdm import tqdm
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 
 
 def mse_criterion(
@@ -79,15 +80,33 @@ def optimizer_factory(optim_type: str, **kwargs) -> torch.optim.Optimizer:
 
     if optim_type == "adam":
         return torch.optim.Adam(**kwargs)
+    elif optim_type == "adamw":
+        return torch.optim.AdamW(**kwargs)
     else:
         raise NotImplementedError
 
 
 def scheduler_factory(
-    scheduler_type: str, optimizer: torch.optim.Optimizer
+    scheduler_type: str, optimizer: torch.optim.Optimizer, scheduler_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
+
     if scheduler_type == "lr_plateau":
+
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+
+    elif scheduler_type == "warmup_cosine": # Same as build_scheduler_pytorch for Wildfire-forecast
+
+        assert scheduler_kwargs is not None, "scheduler_kwargs must be provided for warmup_cosine scheduler"
+
+        warmup_epochs = scheduler_kwargs.get("warmup_epochs", 0)
+        max_epochs = scheduler_kwargs.get("max_epochs", 20)
+        start_factor = scheduler_kwargs.get("lr_start", 1e-4) / scheduler_kwargs.get("lr_base", 1e-3)
+        lr_min = scheduler_kwargs.get("lr_min", 1e-5)
+
+        warmup_scheduler = LinearLR(optimizer, start_factor=start_factor, end_factor=1.0, total_iters=warmup_epochs)
+        cosine_scheduler = CosineAnnealingLR(optimizer, T_max=max_epochs - warmup_epochs, eta_min=lr_min)
+        return SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epochs])
+
     else:
         return None
 

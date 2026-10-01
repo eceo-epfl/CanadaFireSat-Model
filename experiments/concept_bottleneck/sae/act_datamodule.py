@@ -76,46 +76,6 @@ class NpyActDataModule(LightningDataModule):
         else:
             return []
 
-"""
-class OnlineActDataModule(LightningDataModule):
-    def __init__(
-        self,
-        model: LightningModule,
-        batch_size: int,
-        train_dataset: Dataset,
-        val_dataset: Optional[Dataset] = None,
-        test_dataset: Optional[Dataset] = None,
-        device: str = "cuda",
-    ):
-        super().__init__()
-        self.batch_size = batch_size
-        self.model = model
-        self.train_dataset = train_dataset
-        self.val_dataset = val_dataset
-        self.test_dataset = test_dataset
-        self.device = device
-
-    def train_dataloader(self, num_workers: int = 8) -> DataLoader:
-        return DataLoader(
-            OnlineActivationDataset(self.model, self.train_dataset, device=self.device), batch_size=self.batch_size, shuffle=True, num_workers=num_workers
-        )
-
-    def val_dataloader(self, num_workers: int = 8) -> Union[DataLoader, List]:
-        if self.val_dataset is not None:
-            return DataLoader(
-                OnlineActivationDataset(self.model, self.val_dataset, device=self.device), batch_size=self.batch_size, shuffle=False, num_workers=num_workers
-            )
-        else:
-            return []
-
-    def test_dataloader(self, num_workers: int = 8) -> Union[DataLoader, List]:
-        if self.test_dataset is not None:
-            return DataLoader(
-                OnlineActivationDataset(self.model, self.test_dataset, device=self.device), batch_size=self.batch_size, shuffle=False, num_workers=num_workers
-            )
-        else:
-            return []"""
-
 
 class OnlineActDataModule(LightningDataModule):
     def __init__(
@@ -126,7 +86,9 @@ class OnlineActDataModule(LightningDataModule):
         val_dataset: Optional[Dataset] = None,
         test_dataset: Optional[Dataset] = None,
         device: str = "cuda",
+        val_batch_size: Optional[int] = None,
         test_batch_size: Optional[int] = None,
+        flag_downsample: bool = True,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -134,8 +96,10 @@ class OnlineActDataModule(LightningDataModule):
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.test_dataset = test_dataset
+        self.val_batch_size = val_batch_size if val_batch_size is not None else batch_size
         self.test_batch_size = test_batch_size if test_batch_size is not None else batch_size
         self._device_str = device
+        self.flag_downsample = flag_downsample
         self.size = (
             int(self.model.model.num_patches**0.5),
             int(self.model.model.num_patches**0.5),
@@ -156,7 +120,7 @@ class OnlineActDataModule(LightningDataModule):
         if self.val_dataset is not None:
             return DataLoader(
                 OnlineActivationDataset(self.val_dataset),
-                batch_size=self.batch_size,
+                batch_size=self.val_batch_size,
                 shuffle=False,
                 num_workers=num_workers,
             )
@@ -196,9 +160,11 @@ class OnlineActDataModule(LightningDataModule):
         elif labels.dim() == 4 and labels.shape[1] != 1:
             labels = labels.unsqueeze(1)  # be explicit; adjust if your raw dim layout differs
 
-        labels = torch.nn.functional.interpolate(
-            labels.float(), size=self.size, mode="nearest"
-        ).round().long()  # [B, 1, H', W']
+        if self.flag_downsample: # Downsample labels to match the patch embedding size for SAE training
+            labels = torch.nn.functional.interpolate(
+                labels.float(), size=self.size, mode="nearest"
+            ).round().long()  # [B, 1, H', W']
+
         labels = labels.view(-1)  # [B * P]
 
         # print(f"Resized and flattened labels shape: {labels.shape}")
@@ -207,5 +173,5 @@ class OnlineActDataModule(LightningDataModule):
 
         return {
             "data": patch_embed,
-            "label": labels,
+            "labels": labels,
         }

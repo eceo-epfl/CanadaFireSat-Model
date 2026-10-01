@@ -71,7 +71,7 @@ class plSAE(pl.LightningModule):
         label_path: Optional[os.PathLike] = None,
         text_enc_kwargs: Optional[Dict[str, Any]] = {},
         text_batch_size: int = 128,
-        arch_kwargs: Dict[str, Any] = {},
+        arch_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__()
@@ -274,7 +274,7 @@ class plSAE(pl.LightningModule):
 
             lat = batch["latitude"]
             long = batch["longitude"]
-            label = batch["label"]
+            label = batch["labels"]
 
             ### Different Ways to Forward
             if self.geo_class:
@@ -302,7 +302,7 @@ class plSAE(pl.LightningModule):
         tracker.update(z)
 
         if flag_mse:
-            label = batch["label"]
+            label = batch["labels"]
             mse = mse_criterion(x, x_hat, z_pre, z, self.net.get_dictionary())
             return loss, z_pre, z, x, x_hat, x_mod, mse
 
@@ -358,12 +358,12 @@ class plSAE(pl.LightningModule):
 
         # Compute codes mean for class specificty error
         assert (
-            len(batch["label"].shape) == 1 or batch["label"].shape[1] == 1
+            len(batch["labels"].shape) == 1 or batch["labels"].shape[1] == 1
         ), "Class specific error need labels in shape N*1 or N"
-        if len(batch["label"].shape) > 1:
-            label = batch["label"].squeeze()
+        if len(batch["labels"].shape) > 1:
+            label = batch["labels"].squeeze()
         else:
-            label = batch["label"]
+            label = batch["labels"]
         codes_stats = {}
         for class_id in torch.unique(label):
             class_codes = codes[label == class_id, :]
@@ -391,7 +391,7 @@ class plSAE(pl.LightningModule):
                 "loss": loss,
                 # "inputs": inputs.detach().cpu(),
                 # "rec_inputs": rec_inputs.detach().cpu(),
-                # "label": batch["label"].detach().cpu(),
+                # "labels": batch["labels"].detach().cpu(),
                 "codes_stats": codes_stats,
             }
         )
@@ -402,7 +402,7 @@ class plSAE(pl.LightningModule):
         outputs = self._val_outputs
         # inputs = torch.cat([x["inputs"] for x in outputs], dim=0)
         # rec_inputs = torch.cat([x["rec_inputs"] for x in outputs], dim=0)
-        # label = torch.cat([x["label"] for x in outputs], dim=0)
+        # label = torch.cat([x["labels"] for x in outputs], dim=0)
 
         alive_features = self.val_dead_tracker.alive_features
         selectivity, selectivity_firing, class_size, class_size_firing = self.class_selectivity(
@@ -460,12 +460,12 @@ class plSAE(pl.LightningModule):
 
         # Compute codes mean for class specificty error
         assert (
-            len(batch["label"].shape) == 1 or batch["label"].shape[1] == 1
+            len(batch["labels"].shape) == 1 or batch["labels"].shape[1] == 1
         ), "Class specific error need labels in shape N*1 or N"
-        if len(batch["label"].shape) > 1:
-            label = batch["label"].squeeze()
+        if len(batch["labels"].shape) > 1:
+            label = batch["labels"].squeeze()
         else:
-            label = batch["label"]
+            label = batch["labels"]
         codes_stats = {}
         for class_id in torch.unique(label):
             class_codes = codes[label == class_id, :]
@@ -493,7 +493,7 @@ class plSAE(pl.LightningModule):
                 "loss": loss,
                 # "inputs": inputs.detach().cpu(),
                 # "rec_inputs": rec_inputs.detach().cpu(),
-                # "label": batch["label"].detach().cpu(),
+                # "labels": batch["labels"].detach().cpu(),
                 # "codes": codes.detach().cpu(),
                 "codes_stats": codes_stats,
             }
@@ -573,9 +573,10 @@ class plSAE(pl.LightningModule):
             self.log("test/text_cosine", text_cosine)
 
 
+    """
     @torch.no_grad()
     def _resample_dead_codes(self):
-        """Extension of the dead code resampling method to handle Relaxed Archetypal SAE."""
+        # Extension of the dead code resampling method to handle Relaxed Archetypal SAE.
 
         dm = self.trainer.datamodule
         assert dm is not None, "Expected a LightningDataModule attached to the trainer."
@@ -674,7 +675,94 @@ class plSAE(pl.LightningModule):
                 if state and "exp_avg" in state and "exp_avg_sq" in state:
                     state["exp_avg"][index].zero_()
                     state["exp_avg_sq"][index].zero_()
+    """
 
+
+    @torch.no_grad()
+    def _resample_dead_codes(self):
+        # Extension of the dead code resampling method to handle Relaxed Archetypal SAE.
+
+        dm = self.trainer.datamodule
+        assert dm is not None, "Expected a LightningDataModule attached to the trainer."
+
+        dead_indices = torch.where(self.train_dead_tracker.alive_features == False)[0]
+        if len(dead_indices) == 0:
+            return
+
+        dataset = OnlineActivationDataset(dm.train_dataset)
+        sampled_indices = random.sample(range(len(dataset)), self.hparams.num_samples)
+        subset = Subset(dataset, sampled_indices)
+        subset_dataloader = DataLoader(subset, batch_size=self.hparams.resample_batch_size, shuffle=False)
+        mse_loss = criterion_factory(loss_type="mse", aggregate_batch=False)
+
+        tot_index_pairs = []  # list of (raw_dataset_idx, patch_position)
+        tot_loss = []
+        for i, raw_batch in tqdm(enumerate(subset_dataloader), total=len(subset_dataloader), desc="Resampling Dead Codes: Inferring Losses"):
+            transformed = dm.on_after_batch_transfer(raw_batch, 0)
+            x = extract_input(transformed)
+            z_pre, z, x_hat = self.net(x)
+
+            loss = mse_loss(x, x_hat, z_pre, z, self.net.get_dictionary())
+
+            batch_size = len(raw_batch["inputs"])  # or however you get B for this raw batch
+            n_tokens = loss.shape[0]
+            assert n_tokens % batch_size == 0, "Expected a fixed number of patches per sample"
+            P = n_tokens // batch_size
+            start = i * self.hparams.resample_batch_size
+            raw_idx_slice = sampled_indices[start:start + batch_size]
+
+            for raw_idx in raw_idx_slice:
+                for p in range(P):
+                    tot_index_pairs.append((raw_idx, p))
+            tot_loss.append(loss.pow(2).detach().cpu())
+
+        tot_loss = torch.cat(tot_loss, dim=0)
+        tot_probs = tot_loss / tot_loss.sum()
+
+        chosen_flat_indices = torch.multinomial(tot_probs, num_samples=len(dead_indices), replacement=False)
+        chosen_pairs = [tot_index_pairs[i] for i in chosen_flat_indices]
+        alive_norm = (
+            self.net.encoder.final_block[0].weight[self.train_dead_tracker.alive_features, :].norm(dim=1)
+        )  # Dimension should be n_concept, last_dimension
+        mean_alive_norm = alive_norm.mean()
+        target_norm = mean_alive_norm * 0.2
+
+        optimizer = self.optimizers()
+        if not isinstance(optimizer, torch.optim.Adam):
+            raise NotImplementedError("Specify reset for other optimizer types")
+
+        for dead_idx, (raw_idx, patch_pos) in tqdm(zip(dead_indices, chosen_pairs), total=len(dead_indices), desc="Resampling Dead Codes: Updating Weights"):
+            raw_sample = dataset[raw_idx]
+            raw_batch_one = default_collate([raw_sample])
+            transformed = dm.on_after_batch_transfer(raw_batch_one, 0)
+            raw_input = extract_input(transformed)
+            sampled_input = raw_input[patch_pos, :].squeeze(0)
+            norm = sampled_input.norm(p=2).clamp_min(1e-8)
+            sampled_input = sampled_input / norm
+
+            self.net.dictionary._weights[dead_idx, :] = sampled_input  # Based on Overcomplete Framework
+            self.net.encoder.final_block[0].weight[dead_idx, :] = sampled_input * target_norm
+            self.net.encoder.final_block[0].bias[dead_idx] = 0.0
+
+            optimizer = self.optimizers()
+            if isinstance(optimizer, torch.optim.Adam):
+                # Handle encoder weight row
+                enc_weight_param = self.net.encoder.final_block[0].weight
+                enc_bias_param = self.net.encoder.final_block[0].bias
+                dec_weight_param = self.net.dictionary._weights
+                for param, index in [
+                    (enc_weight_param, dead_idx),
+                    (enc_bias_param, dead_idx),
+                    (dec_weight_param, dead_idx),
+                ]:
+                    state = optimizer.state.get(param, {})
+                    if state:
+                        state = optimizer.state[param]
+                        if "exp_avg" in state and "exp_avg_sq" in state:
+                            state["exp_avg"][index].zero_()
+                            state["exp_avg_sq"][index].zero_()
+            else:
+                raise NotImplementedError("Specify reset for other optimizer types")
 
     """
     @torch.no_grad()
@@ -704,7 +792,7 @@ class plSAE(pl.LightningModule):
                 raise NotImplementedError("Geolocational Conditioning is not implemented yet")
                 lat = batch["latitude"].to(self.device)
                 long = batch["longitude"].to(self.device)
-                label = batch["label"].to(self.device)
+                label = batch["labels"].to(self.device)
                 if self.geo_class:
                     z_pre, z, x_hat, _ = self.forward(x, lat, long, label)
                 else:
@@ -733,7 +821,7 @@ class plSAE(pl.LightningModule):
                 raise NotImplementedError("Geolocational Conditioning is not implemented yet")
                 lat = raw_input["latitude"].to(self.device)
                 long = raw_input["longitude"].to(self.device)
-                label = raw_input["label"].to(self.device)
+                label = raw_input["labels"].to(self.device)
                 if self.geo_class:
                     _, _, _, sampled_input = self.forward(
                         sampled_input.unsqueeze(0), lat.unsqueeze(0), long.unsqueeze(0), label.unsqueeze(0)

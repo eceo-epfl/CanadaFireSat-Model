@@ -3,14 +3,14 @@ Module dedicated to trackers for SAEs training. Imported and modified from Overc
 """
 
 import torch
-from torch import nn
+from torch import Union, nn
 
 
 class DeadCodeTracker(nn.Module):
-    def __init__(self, nb_concepts: int, dead_feature_window: int):
+    def __init__(self, nb_concepts: int, dead_feature_window: int, device: Union[str, torch.device] = "cpu"):
         super().__init__()
-        self.register_buffer("alive_features", torch.zeros(nb_concepts, dtype=torch.bool))
-        self.register_buffer("n_updates_since_fired", torch.zeros(nb_concepts, dtype=torch.int))
+        self.register_buffer("alive_features", torch.zeros(nb_concepts, dtype=torch.bool, device=device))
+        self.register_buffer("n_updates_since_fired", torch.zeros(nb_concepts, dtype=torch.int, device=device))
         self.dead_feature_window = dead_feature_window
 
     def update(self, z: torch.Tensor):

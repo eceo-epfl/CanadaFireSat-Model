@@ -88,44 +88,16 @@ def train(cfg: DictConfig):
     log.info(f"Instantiating trainer <{cfg.trainer_sae._target_}>")
     trainer_sae: Trainer = hydra.utils.instantiate(cfg.trainer_sae, callbacks=callbacks, logger=logger)
 
-    """
-    if cfg.get("use_archetypical", False):
-        sae.set_arch(arch_kwargs=cfg.sae.get("arch_kwargs"))
-
-        opt_conf = sae.configure_optimizers()
-        # normalize whatever shape configure_optimizers() returns
-        if isinstance(opt_conf, (list, tuple)) and len(opt_conf) == 2:
-            opts, _ = opt_conf  # (optimizers, schedulers)
-        elif isinstance(opt_conf, (list, tuple)):
-            opts = opt_conf
-        else:
-            opts = [opt_conf]
-
-        tracked = any(
-            sae.net.dictionary.W is p
-            for opt in opts
-            for g in opt.param_groups
-            for p in g["params"]
-        )
-        print("New dictionary.W is tracked:", tracked)"""
-
-    """
-    elif cfg.get("use_class_init", False):
-        X = np.load(cfg.get("train_npy_path"), mmap_mode="r")
-        y = np.load(cfg.get("train_label_path"), mmap_mode="r")
-        sae.set_init_class(
-            X=X, y=y, pos_class_budget=cfg.get("pos_class_budget", 0.5), mode=cfg.get("mode", "kmeans-under")
-        )
-    """
-
-    # --------------------------------------------------
     #  TEST-ONLY MODE (skip training and activations)
-    # --------------------------------------------------
     if cfg.get("test_only", False):
         log.info("Running in TEST ONLY mode...")
         log.info(f"Loading SAE checkpoint from {cfg.sae_ckpt_path}")
-
         ckpt = torch.load(cfg.sae_ckpt_path, map_location=device)
+        sae.to(device)
+
+        if sae.hparams.get("arch_kwargs", None) is not None:
+            sae.set_arch(sae.hparams["arch_kwargs"])
+
         missing, unexpected = sae.load_state_dict(ckpt["state_dict"], strict=True)
         log.info(f"Missing keys: {missing}")
         log.info(f"Unexpected keys: {unexpected}")

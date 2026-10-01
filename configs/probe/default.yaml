@@ -1,0 +1,21 @@
+_target_: experiments.concept_bottleneck.bottleneck.probe.SAEProbe
+sae_folder_path: ""
+sae_epoch_num: ""
+sae_ckpt_path: ${paths.log_dir}/train-sae/runs/${probe.sae_folder_path}/checkpoints/${probe.sae_epoch_num}.ckpt
+alive_mask_path: ${paths.log_dir}/train-sae/runs/${probe.sae_folder_path}/alive_mask.pt
+num_classes: 1
+loss_config:
+    pos_weight: 6.7
+    loss_type: combined_dice_ce
+threshold: 0.5
+l1_lambda: 1e-4
+weight_decay: 0.
+optimizer_type: adam
+scheduler_type:
+sparsity_eps: 1e-6
+out_H: ${MODEL.out_H}
+out_W: ${MODEL.out_W}
+reconstructed_batch_size: ${probe_batch_size}
+sae_load_device: "cuda"
+scheduler_kwargs:
+    lr_base: 5e-5 # Check what is used as BASE in MS-CLIP.
