@@ -1,0 +1,74 @@
+defaults:
+  - _self_
+  - global_config
+  - sae: topk_arch.yaml
+
+# Runtime
+# Override these values from the command line when evaluating a different run.
+device: "cuda"
+seed: 42
+eval_split: "val"  # train, val, or test
+topK: 5
+use_vocab_emb: True
+
+# Checkpoints
+model_ckpt: "MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
+model_path: "${paths.root_dir}/results/models/${model_ckpt}"
+config_name: "config_file.yaml"
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-12_10-41-46/checkpoints/epoch_007.ckpt"
+alive_feature_path: "${paths.root_dir}/notebooks/alive_features-2026-10-12_10-41-46.npy"
+input_shape: 512
+nb_concepts: 1024
+nb_k: 10
+sae_lr: 5e-4
+
+MODEL:
+  architecture:  "MSClipFacto"
+  out_H: 26
+  out_W: 26
+  input_img_res: 264
+  img_res: 260
+  test_max_seq_len: null
+
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 1
+    num_workers: 1
+    hard: False
+
+# The CSV must contain a column named `term`. Its row order must match the
+# vocabulary embedding file configured in configs/sae/topk.yaml.
+vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.3.csv"
+
+# Plot controls. Feature indices refer to original SAE concept indices.
+plot_topk: False
+output_dir: "${paths.log_dir}/train-sae/runs/2026-10-12_10-41-46"
+plot_feature_indices: null
+# Example: plot_feature_indices: [12, 45, 103]

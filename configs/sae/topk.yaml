@@ -7,7 +7,7 @@ num_samples: 20000
 resample_every_n_epochs: 100 # 100 Equivalent to NO resampling or 1 for resampling at each epoch
 resample_batch_size: 32
 bind_init: True
-label_path: "${paths.dict_path}/spacy_msclip_general_f1k2n3max1500000parserFalse_homogeneous_25252_labels.npy"
+label_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.4_embed.npy"
 text_enc_kwargs:
     model_name: Llama3-MS-CLIP-Base
     pretrained: True

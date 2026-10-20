@@ -169,6 +169,7 @@ cython_debug/
 # Ignore Data Folder
 /boreal_data
 /VITS_data
+/data
 
 # Pylance config file
 pyrightconfig.json

@@ -81,13 +81,16 @@ def compute_text_patch_metrics(cfg: DictConfig):
 
     ### Extracting text concepts
     @torch.no_grad()
-    def batch_encode_text(texts: List[str], batch_size: int) -> torch.Tensor:
+    def batch_encode_text(texts: List[str], batch_size: int, with_norm: bool = True) -> torch.Tensor:
         embs = []
         for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
             batch = texts[i:i + batch_size]
             toks = model.model.tokenizer(batch).to(model.device)
             e = model.model.msclip_model.inference_text(toks)
-            e = F.normalize(e, dim=-1)
+
+            if with_norm:
+                e = F.normalize(e, dim=-1)
+
             embs.append(e.cpu())
         return torch.cat(embs, dim=0)  # [N, D]
 
@@ -97,11 +100,21 @@ def compute_text_patch_metrics(cfg: DictConfig):
         concept_df = pd.read_csv(cfg["concept_path"]).sort_values("frequency", ascending=False)
         concept_list = concept_df["concept"].tolist()[:cfg["dict_size"]]
         concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
-    if cfg["concept_ext"] == "all":
+    elif cfg["concept_ext"] == "all":
         output_name = Path(cfg["concept_path"]).stem
         concept_df = pd.read_csv(cfg["concept_path"])
         concept_list = concept_df["concept"].tolist()
         concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
+    elif cfg["concept_ext"] == "apertus":
+        output_name = Path(cfg["concept_path"]).stem
+        concept_df = pd.read_csv(cfg["concept_path"])
+        concept_list = concept_df["term"].tolist()
+        concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"], with_norm=False) # [num_concepts, D]
+
+        # Save the concept embeddings to a .npy file for future use and normalize them for similarity calculations
+        np.save(Path(cfg["concept_path"]).parent / f"{Path(cfg['concept_path']).stem}_embed.npy", concept_embed.numpy())
+        concept_embed = F.normalize(concept_embed, dim=-1)
+
     else:
         output_name = Path(cfg["concept_path"]).stem
         concept_embed = np.load(cfg["concept_path"]) # TODO: Potentially use the label here and not the centroid vector.

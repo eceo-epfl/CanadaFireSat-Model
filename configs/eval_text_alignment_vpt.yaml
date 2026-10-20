@@ -1,0 +1,25 @@
+defaults:
+  - _self_
+  - global_config
+  - sae: topk_arch.yaml
+
+# Runtime
+# Override these values from the command line when evaluating a different run.
+device: "cuda"
+seed: 42
+
+# Checkpoints
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-14_08-40-46/checkpoints/epoch_017.ckpt"
+alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-10-14_08-40-46/alive_mask.pt"
+input_shape: 512
+nb_concepts: 2048
+nb_k: 20
+sae_lr: 5e-4
+
+
+# The CSV must contain a column named `term`. Its row order must match the
+# vocabulary embedding file configured in configs/sae/topk.yaml.
+vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
+
+# Plot controls. Feature indices refer to original SAE concept indices.
+output_dir: "${paths.log_dir}/train-sae/runs/2026-10-14_08-40-46"

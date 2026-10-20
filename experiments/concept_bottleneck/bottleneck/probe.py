@@ -117,7 +117,6 @@ class SAEProbe(pl.LightningModule):
         sparsity_eps: float = 1e-6,
         out_H: int = 25,
         out_W: int = 25,
-        reconstructed_batch_size: int = 32,
         scheduler_kwargs: Optional[Dict[str, Any]] = None,
         sae_load_device: Union[str, torch.device] = "cpu",
         **kwargs
@@ -150,6 +149,9 @@ class SAEProbe(pl.LightningModule):
         self._val_outputs: List[Dict[str, np.ndarray]] = []
         self._test_outputs: List[Dict[str, np.ndarray]] = []
 
+    def _batch_size(self, y):
+        return y.numel() // (self.hparams.out_H * self.hparams.out_W)
+
     # Keep the SAE in eval mode even when Lightning calls .train()
     def train(self, mode: bool = True):
         super().train(mode)
@@ -163,15 +165,15 @@ class SAEProbe(pl.LightningModule):
         _, z, _ = self.sae(x)
         return z[:, self.alive_idx]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, batch_size: int) -> torch.Tensor:
         """Forward pass of the probe."""
         out = self.probe(self.encode(x)) # B*P,C
         out = rearrange(
             out,
             '(b h w) c -> b c h w',
-            b=self.hparams.reconstructed_batch_size,
-            h=int((out.shape[0] // self.hparams.reconstructed_batch_size) ** 0.5),
-            w=int((out.shape[0] // self.hparams.reconstructed_batch_size) ** 0.5),
+            b=batch_size,
+            h=int((out.shape[0] // batch_size) ** 0.5),
+            w=int((out.shape[0] // batch_size) ** 0.5),
         )
         out = F.interpolate(
             out, size=(self.hparams.out_H, self.hparams.out_W),
@@ -200,7 +202,7 @@ class SAEProbe(pl.LightningModule):
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
         x = extract_input(batch) # Same as batch["data"]
         y = segmentation_ground_truths(batch)[0].long()  # Same as batch["label"].long() just aligned with ImgModule
-        logits = self.forward(x)
+        logits = self.forward(x, self._batch_size(y))
         loss, task, l1 = self._loss(logits, y)
         self.log("train/total_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/task_loss", task, on_step=False, on_epoch=True, prog_bar=True)
@@ -209,13 +211,13 @@ class SAEProbe(pl.LightningModule):
 
     def on_train_epoch_end(self):
         w = self.probe.weight.detach()
-        self.log("probe_nonzero_frac", (w.abs() > self.hparams.sparsity_eps).float().mean(), prog_bar=True)
+        self.log("train/probe_nonzero_frac", (w.abs() > self.hparams.sparsity_eps).float().mean(), prog_bar=True)
 
     def _eval_step(self, batch: Dict[str, Any], buffer: List[Dict[str, np.ndarray]]):
         x = extract_input(batch) # Same as batch["data"]
         y = segmentation_ground_truths(batch)[0].long()  # Same as batch["label"].long() just aligned with ImgModule
-        logits = self.forward(x)
-        loss, _, _ = self._loss(logits, y)
+        logits = self.forward(x, self._batch_size(y))
+        loss, task, _ = self._loss(logits, y)
         probs, preds = self._probs_preds(logits)
         buffer.append(
             {
@@ -223,6 +225,7 @@ class SAEProbe(pl.LightningModule):
                 "labels": y.view(-1).cpu().numpy(),
                 "probs": probs.view(-1, self.num_classes).cpu().numpy(),
                 "loss": loss.detach().view(-1).cpu().numpy(),
+                "task": task.detach().view(-1).cpu().numpy(),
             }
         )
         return loss
@@ -232,6 +235,7 @@ class SAEProbe(pl.LightningModule):
         labels = np.concatenate([o["labels"] for o in buffer])
         probs = np.concatenate([o["probs"] for o in buffer])
         loss = np.array([o["loss"] for o in buffer])
+        task = np.concatenate([o["task"] for o in buffer])
         buffer.clear()
 
         n_classes = self.num_classes + 1 if self.num_classes == 1 else self.num_classes
@@ -243,7 +247,8 @@ class SAEProbe(pl.LightningModule):
         c_acc, c_p, c_r, c_f1, c_iou = eval_metrics["class"]
 
         metrics = {
-            f"{name}/loss": loss.mean(),
+            f"{name}/total_loss": loss.mean(),
+            f"{name}/task_loss": task.mean(),
             f"{name}/macro_Accuracy": macro_acc,
             f"{name}/macro_Precision": macro_p,
             f"{name}/macro_Recall": macro_r,
@@ -265,7 +270,7 @@ class SAEProbe(pl.LightningModule):
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         current_lr = self.optimizers().param_groups[0]["lr"]
-        self.log("learning_rate", current_lr, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+        self.log(f"{name}/learning_rate", current_lr, on_step=False, on_epoch=True, prog_bar=False, logger=True)
 
     def validation_step(self, batch, batch_idx):
         return self._eval_step(batch, self._val_outputs)

@@ -4,6 +4,8 @@ from pathlib import Path
 from scipy.stats import skew, kurtosis
 import numpy as np
 
+from experiments.concept_bottleneck.sae.metrics import _cosine_similarity_matrix
+
 
 def bimodality_coefficient(x: np.ndarray) -> float:
     n = len(x)
@@ -112,3 +114,10 @@ def compute_image_entropy_normalized(
     max_entropy = np.log(n_assigned)  # entropy if uniform over n_assigned concepts
 
     return float(entropy / max_entropy)
+
+
+@torch.no_grad()
+def compute_text_dist(codes_dict: torch.Tensor, label_vocab_emb: torch.Tensor) -> float:
+    cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb).abs()
+    max_cosine_per_atom, max_i = torch.max(cosine_matrix, dim=1)
+    return max_cosine_per_atom, max_i

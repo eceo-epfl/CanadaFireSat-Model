@@ -292,7 +292,7 @@ class plSAE(pl.LightningModule):
 
         ### No Geolocational Conditioning
         else:
-            z_pre, z, x_hat = self.net(x)
+            z_pre, z, x_hat = self.forward(x)
             x_mod = None
             if self.use_ghost:
                 loss = self.criterion(x, x_hat, z_pre, z, self.net.get_dictionary(), ghost_grad_neuron_mask)
@@ -573,7 +573,6 @@ class plSAE(pl.LightningModule):
             self.log("test/text_cosine", text_cosine)
 
 
-    """
     @torch.no_grad()
     def _resample_dead_codes(self):
         # Extension of the dead code resampling method to handle Relaxed Archetypal SAE.
@@ -675,9 +674,8 @@ class plSAE(pl.LightningModule):
                 if state and "exp_avg" in state and "exp_avg_sq" in state:
                     state["exp_avg"][index].zero_()
                     state["exp_avg_sq"][index].zero_()
+
     """
-
-
     @torch.no_grad()
     def _resample_dead_codes(self):
         # Extension of the dead code resampling method to handle Relaxed Archetypal SAE.
@@ -762,105 +760,8 @@ class plSAE(pl.LightningModule):
                             state["exp_avg"][index].zero_()
                             state["exp_avg_sq"][index].zero_()
             else:
-                raise NotImplementedError("Specify reset for other optimizer types")
-
-    """
-    @torch.no_grad()
-    def _resample_dead_codes(self):
-        # Implements resampling of dead codes from
-        # https://transformer-circuits.pub/2023/monosemantic-features/index.html#appendix-autoencoder-resampling
-
-        dead_indices = torch.where(self.train_dead_tracker.alive_features == False)[0]
-        if len(dead_indices) == 0:
-            return
-
-        dataset = self.trainer.train_dataloader.dataset
-
-        sampled_indices = random.sample(range(len(dataset)), self.hparams.num_samples)
-        subset = Subset(dataset, sampled_indices)
-        subset_dataloader = DataLoader(subset, batch_size=self.hparams.resample_batch_size, shuffle=False)
-
-        mse_loss = criterion_factory(loss_type="mse", aggregate_batch=False)
-
-        tot_indices = []
-        tot_loss = []
-        for i, batch in enumerate(subset_dataloader):
-            x = extract_input(batch)
-            x = x.to(self.device)
-
-            if self.geonet is not None:
-                raise NotImplementedError("Geolocational Conditioning is not implemented yet")
-                lat = batch["latitude"].to(self.device)
-                long = batch["longitude"].to(self.device)
-                label = batch["labels"].to(self.device)
-                if self.geo_class:
-                    z_pre, z, x_hat, _ = self.forward(x, lat, long, label)
-                else:
-                    z_pre, z, x_hat, _ = self.forward(x, lat, long)
-            else:
-                z_pre, z, x_hat = self.net(x)
-
-            loss = mse_loss(x, x_hat, z_pre, z, self.net.get_dictionary())
-            start = i * self.hparams.resample_batch_size
-            end = start + loss.shape[0]
-
-            tot_indices.extend(sampled_indices[start:end])
-            tot_loss.append(loss.pow(2).detach().cpu())
-
-        tot_loss = torch.cat(tot_loss, dim=0)
-        tot_probs = tot_loss / tot_loss.sum()
-
-        chosen_indices = torch.multinomial(tot_probs, num_samples=len(dead_indices), replacement=False)
-        chosen_dataset_indices = [tot_indices[i] for i in chosen_indices]
-        for dead_idx, chosen_idx in zip(dead_indices, chosen_dataset_indices):
-            raw_input = dataset[chosen_idx]
-            sampled_input = extract_input(raw_input).to(self.device)
-
-            # RAW Resample
-            if self.geonet is not None:
-                raise NotImplementedError("Geolocational Conditioning is not implemented yet")
-                lat = raw_input["latitude"].to(self.device)
-                long = raw_input["longitude"].to(self.device)
-                label = raw_input["labels"].to(self.device)
-                if self.geo_class:
-                    _, _, _, sampled_input = self.forward(
-                        sampled_input.unsqueeze(0), lat.unsqueeze(0), long.unsqueeze(0), label.unsqueeze(0)
-                    )
-                else:
-                    _, _, _, sampled_input = self.forward(
-                        sampled_input.unsqueeze(0), lat.unsqueeze(0), long.unsqueeze(0)
-                    )
-
-            sampled_input = sampled_input / sampled_input.norm(p=2)
-            self.net.dictionary._weights[dead_idx, :] = sampled_input  # Based on Overcomplete Framework
-            alive_norm = (
-                self.net.encoder.final_block[0].weight[self.train_dead_tracker.alive_features, :].norm(dim=1)
-            )  # Dimension should be n_concept, last_dimension
-            mean_alive_norm = alive_norm.mean()
-            target_norm = mean_alive_norm * 0.2
-
-            self.net.encoder.final_block[0].weight[dead_idx, :] = sampled_input * target_norm
-            self.net.encoder.final_block[0].bias[dead_idx] = 0.0
-
-            optimizer = self.optimizers()
-            if isinstance(optimizer, torch.optim.Adam):
-                # Handle encoder weight row
-                enc_weight_param = self.net.encoder.final_block[0].weight
-                enc_bias_param = self.net.encoder.final_block[0].bias
-                dec_weight_param = self.net.dictionary._weights
-                for param, index in [
-                    (enc_weight_param, dead_idx),
-                    (enc_bias_param, dead_idx),
-                    (dec_weight_param, dead_idx),
-                ]:
-                    state = optimizer.state.get(param, {})
-                    if state:
-                        state = optimizer.state[param]
-                        if "exp_avg" in state and "exp_avg_sq" in state:
-                            state["exp_avg"][index].zero_()
-                            state["exp_avg_sq"][index].zero_()
-            else:
                 raise NotImplementedError("Specify reset for other optimizer types")"""
+
 
     @torch.no_grad()
     def _initialize_encoder_from_decoder(self):

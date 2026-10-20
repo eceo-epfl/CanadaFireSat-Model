@@ -6,3 +6,4 @@ transformers>=4.56.0
 accelerate
 huggingface_hub
 pandas
+wordfreq
