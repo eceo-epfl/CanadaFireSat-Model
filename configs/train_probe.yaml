@@ -81,6 +81,11 @@ probe_max_epochs: 10
 test_time_adaptive_seq_len: True
 probe_batch_size: 24
 
+# Optional alternate labels for a second validation/test pass after training.
+# The rerun uses separate W&B runs named after the training run with
+# "-new-label-val" and "-new-label-test" suffixes.
+rerun_label_dir: null
+
 # tags to help you identify your experiments
 # you can overwrite this in experiment configs
 # overwrite from command line with `python train.py tags="[first_tag, second_tag]"`

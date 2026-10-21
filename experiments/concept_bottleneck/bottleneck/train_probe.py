@@ -8,8 +8,9 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import wandb
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers.logger import Logger
 import yaml
@@ -116,6 +117,81 @@ def train(cfg: DictConfig):
 
         # Test the probe.
         trainer_probe.test(model=probe, datamodule=probe_datamodule, ckpt_path="best")
+
+        rerun_label_dir = cfg.get("rerun_label_dir")
+        if rerun_label_dir:
+            log.info(f"Rerunning validation and test with labels from <{rerun_label_dir}>")
+
+            rerun_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=False))
+            rerun_cfg.DATASETS.eval.label_dir = rerun_label_dir
+            rerun_cfg.DATASETS.kwargs.use_label_dir_neg = False # In toy labels, we want to use the new label dir for both positive and negative samples. But not for the original label dir.
+            rerun_datamodule = get_data(rerun_cfg)
+
+            ### For Test we want batch size of 1 and adaptive sequence length (no padding) ###
+            if rerun_cfg.test_time_adaptive_seq_len:
+                rerun_cfg.MODEL.test_max_seq_len = None
+
+            rerun_val_dataset = rerun_datamodule.test_dataloader(split="val").dataset
+            rerun_test_dataset = rerun_datamodule.test_dataloader(split="test").dataset
+
+            rerun_probe_datamodule = OnlineActDataModule(
+                model=model,
+                train_dataset=probe_datamodule.train_dataset,
+                val_dataset=rerun_val_dataset,
+                test_dataset=rerun_test_dataset,
+                device=cfg.device if torch.cuda.is_available() else "cpu",
+                batch_size=cfg.probe_batch_size,
+                val_batch_size=1,
+                test_batch_size=1,
+                flag_downsample=False,
+            )
+
+            # WandbLogger.name returns the project; the run name lives on the experiment
+            base_run_name = logger[0].experiment.name if logger else "probe"
+
+            def evaluate_rerun_split(split: str) -> List[Dict[str, Any]]:
+                # WandbLogger reuses any active wandb.run, so close it to start a new run
+                wandb.finish()
+
+                rerun_logger_cfg = OmegaConf.create(
+                    OmegaConf.to_container(cfg.get("logger"), resolve=True)
+                )
+                if "wandb" not in rerun_logger_cfg:
+                    raise ValueError(
+                        "A W&B logger is required for alternate-label evaluation."
+                    )
+
+                rerun_logger_cfg.wandb.name = f"{base_run_name}-new-label-{split}"
+                rerun_logger_cfg.wandb.id = None
+                rerun_logger_cfg.wandb.job_type = f"eval-new-label-{split}"
+                rerun_logger = instantiate_loggers(rerun_logger_cfg)
+                rerun_trainer: Trainer = hydra.utils.instantiate(
+                    cfg.trainer_probe,
+                    callbacks=[],
+                    logger=rerun_logger,
+                    enable_checkpointing=False,
+                )
+                if split == "val":
+                    return rerun_trainer.validate(
+                        model=probe,
+                        datamodule=rerun_probe_datamodule,
+                    )
+                return rerun_trainer.test(
+                    model=probe,
+                    datamodule=rerun_probe_datamodule,
+                )
+
+            rerun_val_results = evaluate_rerun_split("val")
+            rerun_test_results = evaluate_rerun_split("test")
+            log.info(
+                f"Alternate-label validation results logged to "
+                f"{base_run_name}-new-label-val: {rerun_val_results}"
+            )
+            log.info(
+                f"Alternate-label test results logged to "
+                f"{base_run_name}-new-label-test: {rerun_test_results}"
+            )
+            wandb.finish()
 
 
 @hydra.main(version_base="1.2", config_path=str(CONFIG_PATH), config_name="train_probe.yaml")

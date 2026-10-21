@@ -10,7 +10,7 @@ eval_split: "val"  # train, val, or test
 use_normalized_activations: False
 
 # Checkpoints
-model_ckpt: "MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
+model_ckpt: "MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
 model_path: "${paths.root_dir}/results/models/${model_ckpt}"
 config_name: "config_file.yaml"
 sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/checkpoints/epoch_018.ckpt"

@@ -94,4 +94,5 @@ imbalanced-learn
 
 # Plot Specific Libraries
 plotly
+kaleido
 adjustText

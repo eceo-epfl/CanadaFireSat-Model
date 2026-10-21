@@ -15,6 +15,7 @@ wandb:
 
 paths:
   label: "/media/data/boreal_data/labels_update"
+  label_toy: "/media/data/boreal_data/toy_labels"
   split: "/media/data/boreal_data/full/COPERNICUS/UPDATE/split_one.json"
   split_hard: "/media/data/boreal_data/full/COPERNICUS/UPDATE/split_one_hard.json"
   pos_sits: "/media/data/boreal_data/full/COPERNICUS/UPDATE/S2_SERIES_SEAS_FORMAT"

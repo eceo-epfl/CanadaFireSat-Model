@@ -1,10 +1,33 @@
+from typing import Optional, Any
+
+from omegaconf import DictConfig
 import torch
 from datetime import datetime
 from pathlib import Path
 from scipy.stats import skew, kurtosis
 import numpy as np
+import yaml
 
 from experiments.concept_bottleneck.sae.metrics import _cosine_similarity_matrix
+from src.models.module_img import ImgModule
+
+
+def load_img_model(cfg: DictConfig, device: torch.device, logger: Optional[Any] = None) -> ImgModule:
+    try:
+        model = ImgModule.load_from_checkpoint(cfg.model_path)
+    except (KeyError, RuntimeError):
+        with open(Path(cfg.model_path).parent / cfg.config_name, "r") as config_file:
+            model_cfg = yaml.load(config_file, Loader=yaml.SafeLoader)
+        model = ImgModule(model_cfg)
+        mis_key, un_keys = model.load_state_dict(torch.load(cfg.model_path, map_location=device), strict=True)
+        if logger is not None:
+            logger.info(f"Missing keys: {mis_key}")
+            logger.info(f"Unexpected keys: {un_keys}")
+
+    model.model.out_H = cfg.MODEL.out_H
+    model.model.out_W = cfg.MODEL.out_W
+    return model.eval().to(device)
+
 
 
 def bimodality_coefficient(x: np.ndarray) -> float:

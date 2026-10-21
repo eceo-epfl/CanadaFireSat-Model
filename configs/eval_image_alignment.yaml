@@ -9,17 +9,17 @@ device: "cuda"
 seed: 42
 eval_split: "val"  # train, val, or test
 topK: 5
-use_vocab_emb: True
+use_vocab_emb: False
 
 # Checkpoints
-model_ckpt: "MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
+model_ckpt: "MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
 model_path: "${paths.root_dir}/results/models/${model_ckpt}"
 config_name: "config_file.yaml"
-sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-12_10-41-46/checkpoints/epoch_007.ckpt"
-alive_feature_path: "${paths.root_dir}/notebooks/alive_features-2026-10-12_10-41-46.npy"
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/checkpoints/epoch_018.ckpt"
+alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/alive_mask.pt"
 input_shape: 512
-nb_concepts: 1024
-nb_k: 10
+nb_concepts: 2048
+nb_k: 20
 sae_lr: 5e-4
 
 MODEL:
@@ -65,10 +65,10 @@ DATASETS:
 
 # The CSV must contain a column named `term`. Its row order must match the
 # vocabulary embedding file configured in configs/sae/topk.yaml.
-vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.3.csv"
+vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
 
 # Plot controls. Feature indices refer to original SAE concept indices.
 plot_topk: False
-output_dir: "${paths.log_dir}/train-sae/runs/2026-10-12_10-41-46"
+output_dir: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58"
 plot_feature_indices: null
 # Example: plot_feature_indices: [12, 45, 103]

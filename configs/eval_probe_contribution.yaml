@@ -1,0 +1,68 @@
+defaults:
+  - global_config
+  - probe: default.yaml
+  - _self_
+
+# Runtime
+device: "cuda"
+seed: 42
+eval_split: "test"  # train, val, or test
+
+# Base MS-CLIP model
+model_ckpt: "MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
+model_path: "${paths.root_dir}/results/models/${model_ckpt}"
+config_name: "config_file.yaml"
+
+# Trained probe checkpoint. The probe configuration below points to its frozen SAE.
+probe_checkpoint_path: "${paths.log_dir}/train-probe/runs/2026-10-20_08-59-35/checkpoints/epoch_012.ckpt"
+probe:
+  sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/checkpoints/epoch_018.ckpt"
+  alive_mask_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/alive_mask.pt"
+MODEL:
+  architecture: "MSClipFacto"
+  out_H: 26
+  out_W: 26
+  input_img_res: 264
+  img_res: 260
+  test_max_seq_len: null
+
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 1
+    num_workers: 1
+    hard: False
+
+# Optional CSV with a `term` column matching the SAE vocabulary embedding order.
+vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
+
+# Sankey filtering. Contributions below the threshold are removed before top-k selection.
+contribution_threshold: 0.0
+top_k_features: 30
+output_dir: "${paths.log_dir}/train-probe/runs/2026-10-20_08-59-35/probe_contributions"

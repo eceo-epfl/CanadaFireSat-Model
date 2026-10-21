@@ -269,8 +269,10 @@ class SAEProbe(pl.LightningModule):
             f"{name}/fire_AUC": class_auc[1],
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        current_lr = self.optimizers().param_groups[0]["lr"]
-        self.log(f"{name}/learning_rate", current_lr, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+        optimizers = self.trainer.optimizers
+        if optimizers:
+            current_lr = optimizers[0].param_groups[0]["lr"]
+            self.log(f"{name}/learning_rate", current_lr, on_step=False, on_epoch=True, prog_bar=False, logger=True)
 
     def validation_step(self, batch, batch_idx):
         return self._eval_step(batch, self._val_outputs)

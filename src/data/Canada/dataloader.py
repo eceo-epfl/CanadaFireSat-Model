@@ -47,6 +47,7 @@ def get_dataloader(
     target_file_id: Optional[int] = None,
     fwi_th: float = None,
     with_loc: bool = False,
+    use_label_dir_neg: bool = False,
     **kwargs,
 ) -> torch.utils.data.DataLoader :
     """Get Dataloader for SITS only.
@@ -84,6 +85,7 @@ def get_dataloader(
         suffix=suffix,
         fast=fast,
         with_loc=with_loc,
+        use_label_dir_neg=use_label_dir_neg,
     )
 
     if target_file_id is not None:
@@ -136,6 +138,7 @@ class SatImDataset(Dataset):
         suffix: str = "one",
         fast: bool = True,
         with_loc: bool = False,
+        use_label_dir_neg: bool = False,
     ):
         """Initialize the Dataset
 
@@ -216,6 +219,7 @@ class SatImDataset(Dataset):
 
         self.suffix = suffix
         self.fast = fast
+        self.use_label_dir_neg = use_label_dir_neg
 
     def __len__(self):
         return len(self.data_paths)
@@ -269,8 +273,10 @@ class SatImDataset(Dataset):
         # Loading the labels
         if file_id == 0:
             labels = np.load(os.path.join(self.label_dir, tile_dir, "label.npy"))
-        else:
+        elif not self.use_label_dir_neg:
             labels = np.zeros((LABEL_IMG_RES, LABEL_IMG_RES))
+        else:
+            labels = np.load(os.path.join(self.label_dir, tile_dir, "label.npy"))
 
         sample = {"10x": images_ts_10, "20x": images_ts_20, "60x": images_ts_60, "labels": labels, "doy": doy_ts}
 

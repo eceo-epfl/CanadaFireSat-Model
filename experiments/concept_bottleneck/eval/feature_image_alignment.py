@@ -324,8 +324,7 @@ def evaluate_image_alignment(cfg: DictConfig):
     datamodule = get_data(cfg)
     train_dataset = datamodule.test_dataloader(split="train").dataset
     val_dataset = datamodule.test_dataloader(split="val").dataset
-    test_datamodule = get_data(cfg)
-    test_dataset = test_datamodule.test_dataloader(split="test").dataset
+    test_dataset = datamodule.test_dataloader(split="test").dataset
     sae_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                             test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
                                             batch_size=1, test_batch_size=1)
@@ -357,9 +356,7 @@ def evaluate_image_alignment(cfg: DictConfig):
     }
 
     if cfg.alive_feature_path is not None and Path(cfg.alive_feature_path).exists():
-        alive_feature = np.load(cfg.alive_feature_path)
-        alive_feature = torch.tensor(alive_feature, dtype=torch.bool, device=device)
-        # alive_feature = torch.load(cfg.alive_feature_path, map_location=device)
+        alive_feature = torch.load(cfg.alive_feature_path, map_location=device)
     else:
         alive_feature = None
 
@@ -371,14 +368,14 @@ def evaluate_image_alignment(cfg: DictConfig):
         postprocess_batch=sae_datamodule.on_after_batch_transfer,
         device=device,
         use_vocab_emb=cfg.use_vocab_emb,
-        plot_dir=(Path(cfg.output_dir) / "feature_alignment")
+        plot_dir=(Path(cfg.output_dir) / f"feature_alignment_vocab_{cfg.use_vocab_emb}_{cfg.eval_split}")
         if cfg.get("plot_topk", True)
         else None,
         normalization_mean=normalization_mean,
         normalization_std=normalization_std,
         plot_feature_indices=cfg.get("plot_feature_indices"),
         vocab_csv_path=(Path(cfg.vocab_csv_path) if cfg.get("vocab_csv_path") else None),
-        results_dir=Path(cfg.output_dir) / "feature_alignment",
+        results_dir=Path(cfg.output_dir) / f"feature_alignment_vocab_{cfg.use_vocab_emb}_{cfg.eval_split}",
     )
 
 if __name__ == "__main__":
