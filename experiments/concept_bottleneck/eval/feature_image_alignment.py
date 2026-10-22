@@ -10,6 +10,7 @@ import torch
 from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader
 from typing import Optional, Callable
+from skimage.exposure import rescale_intensity
 
 from tqdm import tqdm
 import yaml
@@ -29,6 +30,24 @@ from src.models.module_img import ImgModule
 
 
 log = get_pylogger(__name__)
+
+# Plot styling
+_TEXT_COLOR = "#1f2328"
+_MUTED_COLOR = "#6e7781"
+_HEATMAP_CMAP = "magma"
+_PANEL_SIZE = 1.9  # inches per image panel
+_HEADER_HEIGHT = 1.3  # inches reserved above the grid for titles
+_SAMPLE_GAP = 0.25  # spacer between samples, relative to panel width
+_COLORBAR_GAP = 0.1
+_COLORBAR_WIDTH = 0.08
+
+
+def _clean_image_axis(axis: plt.Axes) -> None:
+    """Hide ticks and spines while keeping the axis visible for row labels."""
+    axis.set_xticks([])
+    axis.set_yticks([])
+    for spine in axis.spines.values():
+        spine.set_visible(False)
 
 
 def save_alignment_results(
@@ -78,10 +97,17 @@ def _display_rgb(
         mean = torch.zeros(image.shape[0])
     if std is None:
         std = torch.ones(image.shape[0])
+    # Dataset stats are stored as (1, C, 1, 1); flatten to (C,) before broadcasting over (C, H, W).
+    mean = mean.reshape(-1)
+    std = std.reshape(-1)
     reflectance = image * std[:, None, None] + mean[:, None, None]
     rgb = reflectance[list(rgb_channels)].detach().cpu().float().numpy()
     rgb = np.moveaxis(rgb, 0, -1)
-    return np.clip(rgb, 0, 1)
+    # Percentile stretch: independent of the reflectance scale (0-1 vs 0-10000) and brightens dim scenes.
+    low, high = np.nanpercentile(rgb, (1, 99))
+    rgb = rescale_intensity(rgb, in_range=(low, high), out_range=(0, 1))
+    return rgb
+    #return np.clip((rgb - low) / max(high - low, 1e-8), 0, 1)
 
 
 @torch.no_grad()
@@ -117,10 +143,9 @@ def plot_topk_feature_images(
             if vocab_names is not None and feature_idx < len(vocab_names)
             else f"feature {alive_indices[feature_idx]}"
         )
-        fig, axes = plt.subplots(2, len(sample_ids) * 3, figsize=(4 * len(sample_ids) * 3, 7))
-        axes = np.asarray(axes).reshape(2, len(sample_ids) * 3)
-
-        for sample_idx, (activation, batch_id) in enumerate(zip(activations, sample_ids)):
+        # Compute every sample's heatmap first so all overlays share one color scale.
+        panels = []
+        for activation, batch_id in zip(activations, sample_ids):
             raw_batch = raw_batches[batch_id]
             inputs = raw_batch["inputs"]
             if inputs.ndim == 5:
@@ -136,23 +161,78 @@ def plot_topk_feature_images(
             feature_codes = codes[..., alive_indices[feature_idx]].reshape(-1)
             side = int(feature_codes.numel() ** 0.5)
             heatmap = feature_codes.reshape(side, side).detach().cpu().numpy()
+            panels.append((activation, inputs, frame_indices, heatmap))
+
+        vmax = max(float(np.nanmax(heatmap)) for *_, heatmap in panels)
+        vmax = vmax if vmax > 0 else 1.0
+
+        # Grid: 3 frame columns per sample, a narrow spacer between samples, and a colorbar column.
+        n_samples = len(panels)
+        width_ratios = []
+        for sample_idx in range(n_samples):
+            width_ratios += [1, 1, 1] + ([_SAMPLE_GAP] if sample_idx < n_samples - 1 else [])
+        width_ratios += [_COLORBAR_GAP, _COLORBAR_WIDTH]
+        fig_height = _PANEL_SIZE * 2 + _HEADER_HEIGHT + 0.25
+        fig = plt.figure(figsize=(_PANEL_SIZE * sum(width_ratios), fig_height), facecolor="white")
+        grid = fig.add_gridspec(
+            2, len(width_ratios), width_ratios=width_ratios,
+            left=0.04, right=0.97, top=1 - _HEADER_HEIGHT / fig_height, bottom=0.2 / fig_height,
+            wspace=0.03, hspace=0.04,
+        )
+
+        overlay = None
+        for sample_idx, (activation, inputs, frame_indices, heatmap) in enumerate(panels):
+            first_column = sample_idx * 4
+            masked_heatmap = np.ma.masked_less_equal(heatmap, 0)
+            group_axes = []
 
             for column, frame_idx in enumerate(frame_indices):
-                axis = axes[0, sample_idx * 3 + column]
-                axis.imshow(_display_rgb(inputs[frame_idx], normalization_mean, normalization_std, rgb_channels))
-                axis.axis("off")
-                axis.set_title(f"t={frame_idx}", fontsize=9)
+                rgb = _display_rgb(inputs[frame_idx], normalization_mean, normalization_std, rgb_channels)
+                height, width = rgb.shape[:2]
 
-                axis = axes[1, sample_idx * 3 + column]
-                axis.imshow(_display_rgb(inputs[frame_idx], normalization_mean, normalization_std, rgb_channels))
-                axis.imshow(heatmap, cmap="magma", alpha=0.55, interpolation="nearest")
-                axis.axis("off")
-                if column == 0:
-                    axis.set_ylabel(f"activation={activation:.3g}", fontsize=9)
+                top_axis = fig.add_subplot(grid[0, first_column + column])
+                top_axis.imshow(rgb)
+                top_axis.set_title(f"t = {frame_idx}", fontsize=8, color=_MUTED_COLOR, pad=3)
 
-        fig.suptitle(feature_name)
-        fig.tight_layout()
-        fig.savefig(output_dir / f"feature_{alive_indices[feature_idx]:05d}.png", dpi=150)
+                bottom_axis = fig.add_subplot(grid[1, first_column + column])
+                bottom_axis.imshow(rgb)
+                # Stretch the patch grid over the full image and leave inactive patches transparent.
+                overlay = bottom_axis.imshow(
+                    masked_heatmap, cmap=_HEATMAP_CMAP, vmin=0, vmax=vmax, alpha=0.6,
+                    interpolation="nearest", extent=(-0.5, width - 0.5, height - 0.5, -0.5),
+                )
+
+                for axis in (top_axis, bottom_axis):
+                    _clean_image_axis(axis)
+                group_axes.append(top_axis)
+
+                if sample_idx == 0 and column == 0:
+                    top_axis.set_ylabel("RGB", fontsize=9, color=_MUTED_COLOR)
+                    bottom_axis.set_ylabel("Feature activation", fontsize=9, color=_MUTED_COLOR)
+
+            # Sample header centered over its three frames.
+            left = group_axes[0].get_position().x0
+            right = group_axes[-1].get_position().x1
+            fig.text(
+                (left + right) / 2, 1 - 0.95 / fig_height, f"Top {sample_idx + 1}  ·  activation {activation:.3g}",
+                ha="center", va="bottom", fontsize=10, color=_TEXT_COLOR,
+            )
+
+        colorbar_axis = fig.add_subplot(grid[1, -1])
+        colorbar = fig.colorbar(overlay, cax=colorbar_axis)
+        colorbar.solids.set_alpha(1)
+        colorbar.outline.set_visible(False)
+        colorbar.ax.tick_params(labelsize=7, colors=_MUTED_COLOR, length=2)
+
+        fig.text(
+            0.04, 1 - 0.2 / fig_height, feature_name, ha="left", va="top",
+            fontsize=14, fontweight="bold", color=_TEXT_COLOR,
+        )
+        fig.text(
+            0.04, 1 - 0.48 / fig_height, f"Feature {alive_indices[feature_idx]}  ·  first / middle / last frame of top-{n_samples} samples",
+            ha="left", va="top", fontsize=9, color=_MUTED_COLOR,
+        )
+        fig.savefig(output_dir / f"feature_{alive_indices[feature_idx]:05d}.png", dpi=150, facecolor="white")
         plt.close(fig)
 
 

@@ -3,8 +3,8 @@ defaults:
   - global_config
 
 
-concept_path: "./results/DictionnaryWordsGeneral/pke_yake_general_f1k2n3max1500000parserFalse_homogeneous_4050_labels.npy"
-concept_ext:  "cluster" #"cluster" #"freq"
+concept_path: "./results/DictionnaryWordsGeneral/baseline.csv"
+concept_ext:  "all" #"cluster" #"freq"
 dict_size: # Only with freq
 use_temp: False
 batch_size_text: 128

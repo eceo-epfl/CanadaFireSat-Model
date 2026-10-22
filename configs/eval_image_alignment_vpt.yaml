@@ -9,7 +9,7 @@ device: "cuda"
 seed: 42
 eval_split: "val"  # train, val, or test
 topK: 5
-use_vocab_emb: False
+use_vocab_emb: True
 
 # Checkpoints
 model_ckpt: "MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
@@ -68,7 +68,7 @@ DATASETS:
 vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
 
 # Plot controls. Feature indices refer to original SAE concept indices.
-plot_topk: False
+plot_topk: True
 output_dir: "${paths.log_dir}/train-sae/runs/2026-10-14_08-40-46"
-plot_feature_indices: null
+plot_feature_indices: [0, 11, 103]
 # Example: plot_feature_indices: [12, 45, 103]

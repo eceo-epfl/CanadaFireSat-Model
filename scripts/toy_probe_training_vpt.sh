@@ -4,8 +4,8 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=0
 export CUDA_LAUNCH_BLOCKING=1.
 
-max_epochs=1
-experiment="DEBUG-TOY-10Xlr-vpt-1e-4-l1-warmup-cosine-probe-training"
+max_epochs=20
+experiment="TOY-10Xlr-vpt-1e-4-l1-warmup-cosine-probe-training"
 model_ckpt="MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
 sae_folder_path="2026-10-14_08-40-46"
 sae_epoch_num="epoch_017"

@@ -141,6 +141,6 @@ def compute_image_entropy_normalized(
 
 @torch.no_grad()
 def compute_text_dist(codes_dict: torch.Tensor, label_vocab_emb: torch.Tensor) -> float:
-    cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb).abs()
+    cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb)
     max_cosine_per_atom, max_i = torch.max(cosine_matrix, dim=1)
     return max_cosine_per_atom, max_i

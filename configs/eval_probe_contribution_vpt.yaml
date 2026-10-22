@@ -5,7 +5,7 @@ defaults:
 
 device: "cuda"
 seed: 42
-eval_split: "test"  # train, val, or test
+eval_split: "val"  # train, val, or test
 
 # Base MS-CLIP model
 model_ckpt: "MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
@@ -62,7 +62,25 @@ DATASETS:
 # Optional CSV with a `term` column matching the SAE vocabulary embedding order.
 vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
 
+# Term merging. Features mapped to the same vocab term are always summed (when a vocab is given).
+# Optionally merge distinct terms whose MS-CLIP text embeddings have cosine >= threshold
+# (null disables it). Linkage: average/complete avoid single-linkage chaining.
+# Centering subtracts the full-vocab mean embedding before the cosine (CLIP text space is anisotropic).
+# On the apertus 4k vocab: centered >= 0.85 ~ spelling/modifier variants, 0.75-0.85 already mixes
+# antonyms (open/closed canopy); raw cosine needs >= 0.95 for the same purity.
+# Naming of merged terms: medoid (most central member), dominant (largest |contribution|),
+# centroid (vocab term closest to the cluster mean, may be outside the cluster).
+merge_identical_terms: true
+merge_cosine_threshold: null
+merge_linkage: "average"
+merge_center_embeddings: true
+merge_naming: "medoid"
+
 # Sankey filtering. Contributions below the threshold are removed before top-k selection.
 contribution_threshold: 0.0
 top_k_features: 30
+# Per-province heatmaps skip provinces with fewer patches of the class (fire / no fire) than this.
+min_region_patches: 500
+# Number of terms in each per-province Sankey (ranked by that province's own contributions).
+region_top_k_features: 5
 output_dir: "${paths.log_dir}/train-probe/runs/2026-10-20_08-59-39/probe_contributions"

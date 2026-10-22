@@ -171,7 +171,11 @@ class OnlineActDataModule(LightningDataModule):
 
         ## --- Ignoring unknown masks for now; CanadaFireSat does not contain them ---
 
-        return {
+        transformed = {
             "data": patch_embed,
             "labels": labels,
         }
+        if "region" in batch:  # Province id per sample, repeated for each of its patches
+            regions = batch["region"].to(self._device_str)  # [B]
+            transformed["region"] = regions.repeat_interleave(patch_embed.shape[0] // regions.shape[0])  # [B * P]
+        return transformed

@@ -5,6 +5,7 @@ from pytorch_lightning import LightningModule
 import torch
 from torch.utils.data import Dataset
 
+from src.constants import CANADA_REGIONS
 from src.data.utils import segmentation_ground_truths
 
 
@@ -81,6 +82,9 @@ class OnlineActivationDataset(Dataset):
     def __getitem__(self, idx) -> Dict[str, Any]:
         data = self.input_dataset[idx]
         sample = data[0]
+        # With return_paths=True the last element is the sample info dict holding the region
+        info = data[-1] if isinstance(data[-1], dict) and "region" in data[-1] else {}
+        region = info.get("region")
         ground_truth = segmentation_ground_truths(sample)
         labels, unk_masks = ground_truth
         return {
@@ -89,4 +93,5 @@ class OnlineActivationDataset(Dataset):
             "seq_lengths": sample["seq_lengths"],
             "labels": labels,
             "unk_masks": unk_masks,
+            "region": CANADA_REGIONS.index(region) if region in CANADA_REGIONS else -1,  # -1: unknown
         }
