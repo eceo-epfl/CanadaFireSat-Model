@@ -665,6 +665,7 @@ class CutOrPad(object):
                 doy_tensor = doy_tensor[uni_idx] if doy_tensor is not None else None
                 mask_tensor = mask_tensor[uni_idx] if mask_tensor is not None else None
             else:
+                raise NotImplementedError("Potential Bug below on the IDX")
                 start_idx = torch.randint(seq_len - self.max_seq_len, (1,))[0]
                 tensor = tensor[start_idx - self.max_seq_len + 1 : start_idx + 1]
                 doy_tensor = doy_tensor[start_idx - self.max_seq_len + 1 : start_idx + 1] if doy_tensor is not None else None

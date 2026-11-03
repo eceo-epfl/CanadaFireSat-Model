@@ -85,6 +85,8 @@ sae_lr: 5e-4
 sae_batch_size: 8
 sae_min_epochs: 1
 sae_max_epochs: 10
+# L2-normalize SAE inputs (use with vocab archetypes, which are unit-norm text embeddings)
+sae_l2_norm: False
 sae_ckpt_path: #"./results/logs/train-sae/runs/2026-09-02_17-40-00/checkpoints/epoch_018.ckpt"
 # use_archetypical: False
 

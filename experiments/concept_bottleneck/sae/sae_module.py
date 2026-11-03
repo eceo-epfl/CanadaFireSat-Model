@@ -29,6 +29,7 @@ from tqdm import tqdm
 from experiments.concept_bottleneck.sae.dataset import OnlineActivationDataset
 from experiments.concept_bottleneck.sae.metrics import (
     compute_coherence,
+    compute_mean_coherence,
     compute_effective_rank,
     compute_stable_rank,
     OODMetric,
@@ -433,10 +434,12 @@ class plSAE(pl.LightningModule):
         stable_rank = compute_stable_rank(self.net.get_dictionary()[alive_features].detach())
         eff_rank = compute_effective_rank(self.net.get_dictionary()[alive_features].detach())
         coherence = compute_coherence(self.net.get_dictionary()[alive_features].detach())
+        mean_coherence = compute_mean_coherence(self.net.get_dictionary()[alive_features].detach())
         ood_score = self.val_ood.compute(alive_features=alive_features).item()
         self.log("val/stable_rank", stable_rank)
         self.log("val/eff_rank", eff_rank)
         self.log("val/coherence", coherence)
+        self.log("val/redundancy", mean_coherence)
         self.log("val/ood_score", ood_score)
 
         if self.label_vocab_emb is not None:
@@ -561,10 +564,12 @@ class plSAE(pl.LightningModule):
         stable_rank = compute_stable_rank(self.net.get_dictionary()[alive_features].detach())
         eff_rank = compute_effective_rank(self.net.get_dictionary()[alive_features].detach())
         coherence = compute_coherence(self.net.get_dictionary()[alive_features].detach())
+        mean_coherence = compute_mean_coherence(self.net.get_dictionary()[alive_features].detach())
         ood_score = self.test_ood.compute(alive_features=alive_features).item()
         self.log("test/stable_rank", stable_rank)
         self.log("test/eff_rank", eff_rank)
         self.log("test/coherence", coherence)
+        self.log("test/redundancy", mean_coherence)
         self.log("test/ood_score", ood_score)
 
         if self.label_vocab_emb is not None:

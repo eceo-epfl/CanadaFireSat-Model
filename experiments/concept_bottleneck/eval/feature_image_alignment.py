@@ -408,6 +408,7 @@ def evaluate_image_alignment(cfg: DictConfig):
     sae_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                             test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
                                             batch_size=1, test_batch_size=1)
+    sae_datamodule.load_input_norm(cfg.sae_ckpt_path)
     normalizer = next(
         transform for transform in datamodule.test_transform.transforms
         if hasattr(transform, "mean") and hasattr(transform, "std")

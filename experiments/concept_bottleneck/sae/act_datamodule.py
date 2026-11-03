@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from pytorch_lightning import LightningDataModule, LightningModule
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
@@ -89,7 +90,13 @@ class OnlineActDataModule(LightningDataModule):
         val_batch_size: Optional[int] = None,
         test_batch_size: Optional[int] = None,
         flag_downsample: bool = True,
+        l2_norm: bool = False,
     ):
+        """
+        l2_norm: L2-normalize the patch embeddings fed to the SAE / probe (same space as the normalized
+          text embeddings, use with vocab archetypes). Saved in Lightning checkpoints (datamodule state_dict);
+          consumers of a trained SAE must call `load_input_norm(sae_ckpt_path)` to apply the same normalization.
+        """
         super().__init__()
         self.batch_size = batch_size
         self.model = model.eval()
@@ -104,9 +111,23 @@ class OnlineActDataModule(LightningDataModule):
             int(self.model.model.num_patches**0.5),
             int(self.model.model.num_patches**0.5),
         )
+        self.l2_norm = l2_norm
 
     def setup(self, stage: Optional[str] = None):
         self.model = self.model.to(self._device_str)
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"l2_norm": self.l2_norm}
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        self.l2_norm = state_dict["l2_norm"]
+
+    def load_input_norm(self, ckpt_path: str) -> "OnlineActDataModule":
+        """Use the input normalization stored in a Lightning checkpoint (e.g. the SAE one)."""
+        state = torch.load(ckpt_path, map_location="cpu").get(self.__class__.__qualname__)
+        self.l2_norm = state["l2_norm"] if state is not None else False  # Older checkpoints: no normalization
+        print(f"[OnlineActDataModule] l2_norm={self.l2_norm} loaded from {ckpt_path}")
+        return self
 
     def train_dataloader(self, num_workers: int = 8) -> DataLoader:
         return DataLoader(
@@ -148,6 +169,8 @@ class OnlineActDataModule(LightningDataModule):
                 inputs, use_temp=True, doy=doy, seq_len=seq_lengths,
             )  # [B, P, D]
             patch_embed = patch_embed.view(-1, patch_embed.shape[-1])  # [B * P, D]
+            if self.l2_norm:
+                patch_embed = F.normalize(patch_embed, dim=-1)
 
         # --- Batched label prep ---
         labels = batch["labels"].to(self._device_str)  # [B, ...]

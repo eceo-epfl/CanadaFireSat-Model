@@ -46,6 +46,14 @@ def compute_coherence(codes_dict: torch.Tensor) -> float:
 
 
 @torch.no_grad()
+def compute_mean_coherence(codes_dict: torch.Tensor) -> float:
+    cosine_matrix = _cosine_similarity_matrix(codes_dict, codes_dict).abs()
+    cosine_matrix = cosine_matrix.fill_diagonal_(-float("inf"))
+    max_cosine_per_atom, _ = torch.max(cosine_matrix, dim=1)
+    return max_cosine_per_atom.mean().item()
+
+
+@torch.no_grad()
 def compute_text_alignment(codes_dict: torch.Tensor, label_vocab_emb: torch.Tensor) -> float:
     cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb)
     max_cosine_per_atom, _ = torch.max(cosine_matrix, dim=1)

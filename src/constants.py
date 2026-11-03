@@ -14,6 +14,22 @@ DATA_PATH_DICT_UPDATE = {
 
 # Data Constants
 CANADA_REF_COLS = ["tile_id", "valid_names", "flag_tile_select", "region", "file_id", "year", "fwinx_mean"]
+# Fixed order of the "region" values in the split files, used to encode the province as an integer id
+CANADA_REGIONS = [
+    "Alberta",
+    "British Columbia",
+    "Manitoba",
+    "New Brunswick",
+    "Newfoundland and Labrador",
+    "Northwest Territories",
+    "Nova Scotia",
+    "Nunavut",
+    "Ontario",
+    "Prince Edward Island",
+    "Quebec",
+    "Saskatchewan",
+    "Yukon",
+]
 BANDS_ALL = [
     "B1",
     "B2",

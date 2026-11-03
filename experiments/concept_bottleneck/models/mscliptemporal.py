@@ -150,7 +150,6 @@ class MSClipTemporalCBM(nn.Module):
         # sae_before_attention: bool = False,
         # concept_attn_temperature: float = 1.0,
         # sae_encode_chunk_size: int = 2048,
-        use_ln_norm_patch: bool = False,
         **kwargs,
         ):
         super().__init__()
@@ -165,7 +164,6 @@ class MSClipTemporalCBM(nn.Module):
         self.patch_size = patch_size
         self.use_cls_fusion = use_cls_fusion # TODO: Not use and could be interesting
         self.use_mixer = use_mixer
-        self.use_ln_norm_patch = use_ln_norm_patch
         # self.log_concepts = log_concepts
         # self.sae_before_attention = bool(sae_before_attention)
         # self.concept_attn_temperature = float(concept_attn_temperature)
@@ -334,6 +332,23 @@ class MSClipTemporalCBM(nn.Module):
             print(f"positional_embedding resized: {pos_embed.shape} -> {new_pos_embed.shape}")
 
 
+    def _encode_images(self, x):
+        """
+        Encode frames [N, C, H, W] -> pooled [N, 512], patch tokens [N, P, 768].
+        Patch tokens come out of ln_post (pre-proj), as returned by MS-CLIP's image_encoder.
+        """
+        if self.vpt is None:
+            return self.msclip_model.image_encoder(x)
+
+        # Same as VisionTransformer.forward, with VPT prompts injected in the transformer blocks
+        v = self.vision
+        feat = v._embeds(x)                                         # [N, 1+P, 768]
+        feat = self.vpt(feat)                                       # [N, 1+P, 768] prompts stripped
+        pooled_feats, patch_feats = v._pool(feat)                   # ln_post as in image_encoder
+        if v.proj is not None:
+            pooled_feats = pooled_feats @ v.proj                    # [N, 512]
+        return pooled_feats, patch_feats
+
     def forward(self, batch, doy=None, seq_len=None):
         # [B, T, C, H, W]
         assert batch.ndim == 5, f"inputs must be [B,T,C,H,W], got {batch.ndim} dims"
@@ -358,38 +373,7 @@ class MSClipTemporalCBM(nn.Module):
         valid_BPT = valid_BT.unsqueeze(1).expand(-1, P, -1)            # [B,P,T]
         valid_mask = valid_BPT.reshape(B * P, T)                       # [B*P,T]
 
-        if self.vpt is not None:
-            # Run VPT forward manually through the vision encoder
-            B_T = x.shape[0]
-            v = self.vision
-
-
-            # Replicate VisionTransformer.forward up to transformer blocks
-            feat = v.conv1(x)                                              # [B*T, D, H_p, W_p]
-            feat = feat.reshape(feat.shape[0], feat.shape[1], -1)         # [B*T, D, P]
-            feat = feat.permute(0, 2, 1)                                   # [B*T, P, D]
-            feat = torch.cat([
-                v.class_embedding.unsqueeze(0).unsqueeze(0).expand(B_T, -1, -1),
-                feat
-            ], dim=1)                                                      # [B*T, 1+P, D]
-            feat = feat + v.positional_embedding.unsqueeze(0)
-            feat = v.ln_pre(feat)
-            # feat = feat.permute(1, 0, 2)                                   # LND
-
-            feat = self.vpt(feat)                                          # [1+P, B*T, D] LND
-
-            #feat = feat.permute(1, 0, 2)                                   # NLD [B*T, 1+P, D]
-            pooled_feats = feat[:, 0]                                      # CLS [B*T, D]
-            patch_feats  = feat[:, 1:]                                     # patches [B*T, P, D]
-
-            # Apply ln_post and proj as normal
-            # patch_feats = v.ln_post(patch_feats) @ v.proj                 # [B*T, P, 512]
-            # Undo proj for mix_dim path (patch_feats before proj needed by temporal mixer)
-            # So instead keep pre-proj features:
-            pooled_feats    = v.ln_post(pooled_feats) if self.use_ln_norm_patch else pooled_feats
-            pooled_feats = pooled_feats @ v.proj            # [B*T, 512]
-        else:
-            pooled_feats, patch_feats = self.msclip_model.image_encoder(x)
+        pooled_feats, patch_feats = self._encode_images(x)             # [B*T, 512], [B*T, P, 768]
 
         """
         if self.use_CBM and self.sae_before_attention:
@@ -532,7 +516,6 @@ class MSClipTemporalCBM(nn.Module):
         idx_bp    = last_idx.unsqueeze(1).expand(B, P).reshape(B*P) # [B*P]
         row_ids   = torch.arange(B*P, device=mix_out.device)
         last_768  = mix_out[row_ids, idx_bp, :]                     # [B*P,768]
-        last_768  = self.vision.ln_post(last_768) if self.use_ln_norm_patch else last_768
         patch_vec = last_768 @ self.vision.proj                     # [B*P,512]
 
         # [B*P, 512] -> [B, P, 512]
@@ -584,28 +567,7 @@ class MSClipTemporalCBM(nn.Module):
 
         x = batch.reshape(B * T, C, H, W)
 
-        if self.vpt is not None:
-            # Run VPT forward manually through the vision encoder
-            B_T = x.shape[0]
-            v = self.vision
-
-            feat = v.conv1(x)                                              # [B*T, D, H_p, W_p]
-            feat = feat.reshape(feat.shape[0], feat.shape[1], -1)         # [B*T, D, P]
-            feat = feat.permute(0, 2, 1)                                   # [B*T, P, D]
-            feat = torch.cat([
-                v.class_embedding.unsqueeze(0).unsqueeze(0).expand(B_T, -1, -1),
-                feat
-            ], dim=1)                                                      # [B*T, 1+P, D]
-            feat = feat + v.positional_embedding.unsqueeze(0)
-            feat = v.ln_pre(feat)
-
-            feat = self.vpt(feat)                                          # [1+P, B*T, D] LND
-            pooled_feats = feat[:, 0]                                      # CLS [B*T, D]
-            patch_feats  = feat[:, 1:]                                     # patches [B*T, P, D]
-            pooled_feats    = v.ln_post(pooled_feats) if self.use_ln_norm_patch else pooled_feats
-            pooled_feats = pooled_feats @ v.proj            # [B*T, 512]
-        else:
-            pooled_feats, patch_feats = self.msclip_model.image_encoder(x)
+        pooled_feats, patch_feats = self._encode_images(x)             # [B*T, 512], [B*T, P, 768]
 
         if use_temp:
 
@@ -639,7 +601,6 @@ class MSClipTemporalCBM(nn.Module):
             idx_bp    = last_idx.unsqueeze(1).expand(B, P).reshape(B*P) # [B*P]
             row_ids   = torch.arange(B*P, device=mix_out.device)
             last_768  = mix_out[row_ids, idx_bp, :]                     # [B*P,768]
-            last_768  = self.vision.ln_post(last_768) if self.use_ln_norm_patch else last_768
             patch_vec = last_768 @ self.vision.proj                     # [B*P,512]
 
             # [B*P, 512] -> [B, P, 512]
@@ -647,8 +608,7 @@ class MSClipTemporalCBM(nn.Module):
 
             return patch_feats
 
-        patch_feats = self.vision.ln_post(patch_feats) if self.use_ln_norm_patch else patch_feats                 # [B*T, P, 768]
-        patch_feats = patch_feats @ self.vision.proj                    # [B*T, P, 512]
+        patch_feats = patch_feats @ self.vision.proj                   # [B*T, P, 512]
 
         patch_feats = patch_feats.view(B, T, self.num_patches, self.embed_dim)
         return patch_feats

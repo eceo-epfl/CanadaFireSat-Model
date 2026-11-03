@@ -1,6 +1,7 @@
 from typing import Optional, Any
 
 from omegaconf import DictConfig
+import pandas as pd
 import torch
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from scipy.stats import skew, kurtosis
 import numpy as np
 import yaml
 
+from experiments.concept_bottleneck.bottleneck.probe import SAEProbe
 from experiments.concept_bottleneck.sae.metrics import _cosine_similarity_matrix
 from src.models.module_img import ImgModule
 
@@ -144,3 +146,21 @@ def compute_text_dist(codes_dict: torch.Tensor, label_vocab_emb: torch.Tensor) -
     cosine_matrix = _cosine_similarity_matrix(codes_dict, label_vocab_emb)
     max_cosine_per_atom, max_i = torch.max(cosine_matrix, dim=1)
     return max_cosine_per_atom, max_i
+
+
+def feature_terms_from_vocab(
+    probe: SAEProbe,
+    vocab_csv_path: Optional[Path],
+) -> tuple[list[str], Optional[np.ndarray], Optional[list[str]]]:
+    """Return the matched term of each alive feature, its vocab index and the full vocab."""
+    alive_indices = probe.alive_idx.detach().cpu()
+    if vocab_csv_path is None:
+        return [f"feature_{int(index)}" for index in alive_indices], None, None
+
+    vocab_terms = pd.read_csv(vocab_csv_path)["term"].astype(str).tolist()
+    _, vocab_indices = compute_text_dist(
+        probe.sae.get_dictionary().cpu()[alive_indices],
+        probe.label_vocab_emb.cpu(),
+    )
+    vocab_indices = vocab_indices.numpy()
+    return [vocab_terms[int(index)] for index in vocab_indices], vocab_indices, vocab_terms

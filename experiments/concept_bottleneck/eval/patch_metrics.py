@@ -117,8 +117,9 @@ def compute_text_patch_metrics(cfg: DictConfig):
 
     else:
         output_name = Path(cfg["concept_path"]).stem
-        concept_embed = np.load(cfg["concept_path"]) # TODO: Potentially use the label here and not the centroid vector.
-        concept_embed = torch.from_numpy(concept_embed)
+        # Expects the *_labels.npy (or *_embed.npy) saved unnormalized by cluster_concept.py / the apertus branch
+        concept_embed = np.load(cfg["concept_path"])
+        concept_embed = F.normalize(torch.from_numpy(concept_embed).float(), dim=-1)
     n_concepts = concept_embed.shape[0] # Check if D here is 512 or 768 -> 512
 
     pairwise_sim_concept = concept_embed @ concept_embed.T

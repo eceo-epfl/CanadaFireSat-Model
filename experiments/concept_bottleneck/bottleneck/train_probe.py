@@ -78,6 +78,7 @@ def train(cfg: DictConfig):
     probe_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                          test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
                                          batch_size=cfg.probe_batch_size, test_batch_size=1, flag_downsample=False)
+    probe_datamodule.load_input_norm(cfg.probe.sae_ckpt_path)
 
     log.info(f"Loading Pretrained SAE at <{cfg.probe.sae_ckpt_path}>")
     sae, _ = load_frozen_sae(cfg.probe.sae_ckpt_path, device=device)
@@ -145,6 +146,7 @@ def train(cfg: DictConfig):
                 test_batch_size=1,
                 flag_downsample=False,
             )
+            rerun_probe_datamodule.load_input_norm(cfg.probe.sae_ckpt_path)
 
             # WandbLogger.name returns the project; the run name lives on the experiment
             base_run_name = logger[0].experiment.name if logger else "probe"

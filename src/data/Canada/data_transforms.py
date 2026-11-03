@@ -289,8 +289,9 @@ class MSCLIPTransformPipeline(TransformPipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         c = self.config
-        self.mean = _extract_stats(c["mean_file"], c["bands"])
-        self.std  = _extract_stats(c["std_file"],  c["bands"])
+        # Stats come out in BANDS_10 + BANDS_20 order; reorder them like the inputs (ReorderBands).
+        self.mean = _extract_stats(c["mean_file"], c["bands"])[:, MSCLIP_ORDER_10]
+        self.std  = _extract_stats(c["std_file"],  c["bands"])[:, MSCLIP_ORDER_10]
         mc = c["model_config"]
         self._img_res       = mc["img_res"]
         self._input_img_res = mc["input_img_res"]

@@ -175,6 +175,7 @@ def evaluate_water_structure(cfg: DictConfig):
     sae_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                             test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
                                             batch_size=1, test_batch_size=1)
+    sae_datamodule.load_input_norm(cfg.sae_ckpt_path)
 
     log.info(f"Instantiating SAE <{cfg.sae._target_}>")
     sae: plSAE = hydra.utils.instantiate(cfg.sae)

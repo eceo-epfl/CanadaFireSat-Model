@@ -74,7 +74,8 @@ def train(cfg: DictConfig):
     test_dataset = test_datamodule.test_dataloader(split="test").dataset
     sae_datamodule = OnlineActDataModule(model=model, train_dataset=train_dataset, val_dataset=val_dataset,
                                          test_dataset=test_dataset, device=cfg.device if torch.cuda.is_available() else "cpu",
-                                         batch_size=cfg.sae_batch_size, test_batch_size=1)
+                                         batch_size=cfg.sae_batch_size, test_batch_size=1,
+                                         l2_norm=cfg.get("sae_l2_norm", False))
 
     log.info(f"Instantiating SAE <{cfg.sae._target_}>")
     sae: plSAE = hydra.utils.instantiate(cfg.sae)
@@ -93,6 +94,7 @@ def train(cfg: DictConfig):
         log.info("Running in TEST ONLY mode...")
         log.info(f"Loading SAE checkpoint from {cfg.sae_ckpt_path}")
         ckpt = torch.load(cfg.sae_ckpt_path, map_location=device)
+        sae_datamodule.load_input_norm(cfg.sae_ckpt_path)
         sae.to(device)
 
         if sae.hparams.get("arch_kwargs", None) is not None:
