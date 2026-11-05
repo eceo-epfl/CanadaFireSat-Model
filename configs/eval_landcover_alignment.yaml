@@ -1,0 +1,104 @@
+defaults:
+  - _self_
+  - global_config
+  - sae: topk_arch.yaml
+
+# Runtime
+# Override these values from the command line when evaluating a different run.
+device: "cuda"
+seed: 42
+
+# Checkpoints
+model_ckpt: "MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
+model_path: "${paths.root_dir}/results/models/${model_ckpt}"
+config_name: "config_file.yaml"
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/checkpoints/epoch_018.ckpt"
+alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/alive_mask.pt"
+input_shape: 512
+nb_concepts: 2048
+nb_k: 20
+sae_lr: 5e-4
+
+MODEL:
+  architecture:  "MSClipFacto"
+  out_H: 26
+  out_W: 26
+  input_img_res: 264
+  img_res: 260
+  test_max_seq_len: null
+
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 1
+    num_workers: 1
+    hard: False
+
+# The CSV must contain a column named `term`. Its row order must match the
+# vocabulary embedding file configured in configs/sae/topk.yaml.
+vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
+
+output_dir: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58"
+
+# ---------------- Land-cover alignment ----------------
+# LC maps exist only for 2020, which belongs to the `train` split (TRAIN_FILTER 2015-2021).
+lc_year: 2020
+source_split: "train"
+lc_dirs: ["/media/data/boreal_data/LC", "/media/data/boreal_data/NEG_LC"]  # indexed by file_id (0=POS, 1=NEG)
+max_samples: null       # debug cap on the number of tiles
+num_workers: 8
+
+# Token labels: per-token class fraction over its patch_size x patch_size LC pixels.
+pos_threshold: 0.5                       # positive: fraction >= tau ; negative: fraction == 0 ; mixed dropped
+threshold_sweep: [0.0, 0.25, 0.5, 0.75]  # 0.0 means "any pixel > 0"
+
+# Class text used by mapping.class_text: "raw" = class name, "template" = this template.
+prompt_template: "A satellite view of {}"
+
+# Atom -> class mapping (cosine in MS-CLIP text space).
+mapping:
+  source: "term"          # "term": nearest-vocab-term embedding of the atom | "atom": atom dictionary vector
+  class_text: "template"  # class embedding to compare against: "raw" | "template"
+  sim_threshold: 0.6      # tune with atom_class_mapping_*.csv and the coverage sweep
+  exclusive: True         # an atom is only assigned to its argmax class
+  coverage_sweep: [0.5, 0.6, 0.7, 0.8]
+
+untrained_seed: 0
+plot: True
+
+lc_classes:  # coarse groups of LAND_COVER_DICT_IDS (ids 3,4,7,9 are tropical)
+  water:     {ids: [18],         name: "water"}
+  forest:    {ids: [1, 2, 5, 6], name: "forest"}
+  shrubland: {ids: [8, 11],      name: "shrubland"}
+  grassland: {ids: [10, 12],     name: "grassland"}
+  wetland:   {ids: [14],         name: "wetland"}
+  cropland:  {ids: [15],         name: "cropland"}
+  barren:    {ids: [13, 16],     name: "barren land"}
+  urban:     {ids: [17],         name: "urban area"}
+  snow_ice:  {ids: [19],         name: "snow and ice"}

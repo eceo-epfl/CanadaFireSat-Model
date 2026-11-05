@@ -10,7 +10,6 @@ import torch
 from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader
 from typing import Optional, Callable
-from skimage.exposure import rescale_intensity
 
 from tqdm import tqdm
 import yaml
@@ -91,8 +90,16 @@ def _display_rgb(
     mean: Optional[torch.Tensor] = None,
     std: Optional[torch.Tensor] = None,
     rgb_channels: tuple[int, int, int] = (2, 1, 0),
+    max_reflectance: float = 0.35,
+    gamma: float = 1 / 1.4,
+    haze_offset: tuple[float, float, float] = (0.015, 0.025, 0.04),
 ) -> np.ndarray:
-    """Undo band normalization and convert a satellite image to RGB."""
+    """Undo band normalization and convert a Sentinel-2 L1C (TOA) image to true-colour RGB.
+
+    `haze_offset` is a per-channel (R, G, B) dark-object subtraction in reflectance units:
+    L1C is top-of-atmosphere, so Rayleigh scattering adds a blue-heavy floor (measured
+    1st percentiles on this dataset: B4~0.027, B3~0.047, B2~0.071) that tints scenes blue.
+    """
     if mean is None:
         mean = torch.zeros(image.shape[0])
     if std is None:
@@ -103,11 +110,13 @@ def _display_rgb(
     reflectance = image * std[:, None, None] + mean[:, None, None]
     rgb = reflectance[list(rgb_channels)].detach().cpu().float().numpy()
     rgb = np.moveaxis(rgb, 0, -1)
-    # Percentile stretch: independent of the reflectance scale (0-1 vs 0-10000) and brightens dim scenes.
-    low, high = np.nanpercentile(rgb, (1, 99))
-    rgb = rescale_intensity(rgb, in_range=(low, high), out_range=(0, 1))
-    return rgb
-    #return np.clip((rgb - low) / max(high - low, 1e-8), 0, 1)
+    # Fixed true-colour scale (standard S2 visualisation): a per-image percentile stretch
+    # blows up the small R<G<B spread of bright snow/ice/cloud scenes into saturated blue/purple.
+    # Reflectance is in 0-10000 units here (uint8 * 10000/255); fall back to 0-1 units otherwise.
+    scale = 10000.0 if np.nanmax(rgb) > 2.0 else 1.0
+    rgb = rgb / scale - np.asarray(haze_offset, dtype=np.float32)
+    rgb = np.clip(rgb / max_reflectance, 0, 1)
+    return rgb ** gamma
 
 
 @torch.no_grad()
@@ -120,6 +129,7 @@ def plot_topk_feature_images(
     postprocess_batch: Callable[[dict, int], dict],
     output_dir: Path,
     vocab_names: Optional[Sequence[str]] = None,
+    text_cosines: Optional[Sequence[float]] = None,
     device: str | torch.device = "cuda",
     normalization_mean: Optional[torch.Tensor] = None,
     normalization_std: Optional[torch.Tensor] = None,
@@ -143,6 +153,8 @@ def plot_topk_feature_images(
             if vocab_names is not None and feature_idx < len(vocab_names)
             else f"feature {alive_indices[feature_idx]}"
         )
+        if text_cosines is not None and feature_idx < len(text_cosines):
+            feature_name = f"{feature_name}  ·  cos(atom, text) = {text_cosines[feature_idx]:.3f}"
         # Compute every sample's heatmap first so all overlays share one color scale.
         panels = []
         for activation, batch_id in zip(activations, sample_ids):
@@ -248,8 +260,9 @@ def set_alignment_topK_images(sae: LightningModule, dataloader: DataLoader, topK
     n_features = int(alive_feature.sum())
 
     vocab_names = None
-    _, text_all_indices_no_dead_val = compute_text_dist(sae.net.get_dictionary()[alive_feature].to("cpu"), sae.label_vocab_emb.to("cpu"))
+    text_cosines, text_all_indices_no_dead_val = compute_text_dist(sae.net.get_dictionary()[alive_feature].to("cpu"), sae.label_vocab_emb.to("cpu"))
     text_all_indices_no_dead_val = text_all_indices_no_dead_val.numpy()
+    text_cosines = text_cosines.tolist()
 
     if vocab_csv_path is not None:
         vocab_terms = pd.read_csv(vocab_csv_path)["term"].tolist()
@@ -361,6 +374,7 @@ def set_alignment_topK_images(sae: LightningModule, dataloader: DataLoader, topK
             postprocess_batch=postprocess_batch,
             output_dir=plot_dir,
             vocab_names=vocab_names,
+            text_cosines=text_cosines,
             device=device,
             normalization_mean=normalization_mean,
             normalization_std=normalization_std,

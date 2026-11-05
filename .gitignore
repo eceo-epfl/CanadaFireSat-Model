@@ -80,6 +80,7 @@ target/
 .ipynb_checkpoints
 notebooks/debug_*.ipynb
 notebooks/paper/
+notebooks
 
 # IPython
 profile_default/

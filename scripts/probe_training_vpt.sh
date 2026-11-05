@@ -6,9 +6,9 @@ export CUDA_LAUNCH_BLOCKING=1.
 
 max_epochs=20
 experiment="10Xlr-vpt-1e-4-l1-warmup-cosine-probe-training"
-model_ckpt="MIXLOSS_HIGHLR10X_VPT_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
-sae_folder_path="2026-10-14_08-40-46"
-sae_epoch_num="epoch_017"
+model_ckpt="VPTFIX_MIXLOSS_VPT_HIGH10X_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
+sae_folder_path="2026-11-03_08-44-00"
+sae_epoch_num="epoch_019"
 lr_base=5e-5
 lr_min=1e-6
 lr_start=1e-6

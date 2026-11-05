@@ -1,0 +1,88 @@
+defaults:
+  - _self_
+  - global_config
+
+# Runtime
+# Override these values from the command line when evaluating a different run.
+device: "cuda"
+seed: 42
+
+# Checkpoint (no SAE needed for the zero-shot baseline)
+model_dir: "VPTFIX_MIXLOSS_VPT_HIGH10X_SITS_ONLY"
+model_ckpt: "${model_dir}/MSClipFacto-18-f1-0.48.ckpt"
+model_path: "${paths.root_dir}/results/models/${model_ckpt}"
+config_name: "config_file.yaml"
+
+MODEL:
+  architecture:  "MSClipFacto"
+  out_H: 25          # label grid = token grid (256 / 16)
+  out_W: 25
+  input_img_res: 264
+  img_res: 256       # center crop 264 -> 256: the 16x16 token grid covers the whole crop, centered in the tile
+  test_max_seq_len: null
+
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 1
+    num_workers: 1
+    hard: False
+
+output_dir: "${paths.root_dir}/results/models/${model_dir}"
+
+# ---------------- Land-cover zero-shot baseline ----------------
+# LC maps exist only for 2020, which belongs to the `train` split (TRAIN_FILTER 2015-2021).
+lc_year: 2020
+source_split: "train"
+lc_dirs: ["/media/data/boreal_data/LC", "/media/data/boreal_data/NEG_LC"]  # indexed by file_id (0=POS, 1=NEG)
+max_samples: null       # debug cap on the number of tiles
+num_workers: 8
+
+# Patch embeddings: temporal (mixer, last valid frame) | frame_last (no mixer) | frame_mean (no mixer, mean over frames)
+variants: ["temporal", "frame_last", "frame_mean"]
+prompt_template: "A satellite view of {}"  # "raw" prompt = the class name alone
+
+# Token labels: per-token class fraction over its patch_size x patch_size LC pixels.
+pos_threshold: 0.5                       # positive: fraction >= tau ; negative: fraction == 0 ; mixed dropped
+threshold_sweep: [0.0, 0.25, 0.5, 0.75]  # 0.0 means "any pixel > 0"
+top_percentiles: [99.0, 99.9]            # precision of tokens above this percentile of the class cosine
+accuracy_min_fraction: 0.5               # accuracy on tokens whose dominant class covers >= this fraction
+
+plot: True
+
+lc_classes:  # coarse groups of LAND_COVER_DICT_IDS (ids 3,4,7,9 are tropical)
+  water:     {ids: [18],         name: "water"}
+  forest:    {ids: [1, 2, 5, 6], name: "forest"}
+  shrubland: {ids: [8, 11],      name: "shrubland"}
+  grassland: {ids: [10, 12],     name: "grassland"}
+  wetland:   {ids: [14],         name: "wetland"}
+  cropland:  {ids: [15],         name: "cropland"}
+  barren:    {ids: [13, 16],     name: "barren land"}
+  urban:     {ids: [17],         name: "urban area"}
+  snow_ice:  {ids: [19],         name: "snow and ice"}

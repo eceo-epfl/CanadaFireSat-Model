@@ -28,10 +28,10 @@ config_name: "config_file.yaml"
 
 MODEL:
   architecture:  "MSClipFacto"
-  out_H: 26
-  out_W: 26
+  out_H: 25
+  out_W: 25
   input_img_res: 264
-  img_res: 260
+  img_res: 256
   # train_max_seq_len: 5
   # val_max_seq_len: 5
   test_max_seq_len: 5

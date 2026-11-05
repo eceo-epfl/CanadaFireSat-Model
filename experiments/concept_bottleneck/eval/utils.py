@@ -1,5 +1,6 @@
 from typing import Optional, Any
 
+import hydra
 from omegaconf import DictConfig
 import pandas as pd
 import torch
@@ -8,9 +9,11 @@ from pathlib import Path
 from scipy.stats import skew, kurtosis
 import numpy as np
 import yaml
+import pytorch_lightning as pl
 
 from experiments.concept_bottleneck.bottleneck.probe import SAEProbe
 from experiments.concept_bottleneck.sae.metrics import _cosine_similarity_matrix
+from experiments.concept_bottleneck.sae.sae_module import plSAE
 from src.models.module_img import ImgModule
 
 
@@ -30,6 +33,24 @@ def load_img_model(cfg: DictConfig, device: torch.device, logger: Optional[Any] 
     model.model.out_W = cfg.MODEL.out_W
     return model.eval().to(device)
 
+
+def load_trained_sae(cfg: DictConfig, device: torch.device, logger: Optional[Any] = None) -> plSAE:
+    sae: plSAE = hydra.utils.instantiate(cfg.sae)
+    sae.to(device)
+    if sae.hparams.get("arch_kwargs", None) is not None:
+        sae.set_arch(sae.hparams["arch_kwargs"])
+    ckpt = torch.load(cfg.sae_ckpt_path, map_location=device)
+    missing, unexpected = sae.load_state_dict(ckpt["state_dict"], strict=True)
+    if logger is not None:
+        logger.info(f"Trained SAE - missing keys: {missing}, unexpected keys: {unexpected}")
+    return sae.eval()
+
+
+def build_untrained_sae(cfg: DictConfig, device: torch.device) -> plSAE:
+    """Randomly initialised SAE with the same architecture (no archetypal init, no checkpoint)."""
+    pl.seed_everything(cfg.untrained_seed, workers=True)
+    sae: plSAE = hydra.utils.instantiate(cfg.sae)
+    return sae.to(device).eval()
 
 
 def bimodality_coefficient(x: np.ndarray) -> float:
