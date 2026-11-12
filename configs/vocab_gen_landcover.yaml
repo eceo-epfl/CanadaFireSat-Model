@@ -1,0 +1,27 @@
+defaults:
+  - _self_
+  - global_config
+
+# Runtime
+seed: 42
+model_name: "swiss-ai/Apertus-8B-Instruct-2509"
+
+output_dir: "${paths.dict_path}/landcover_vocab"
+
+# Generation
+min_terms: 10          # minimum distinct 1- to 3-word terms per class
+terms_requested: 20    # terms asked for in the prompt: above min_terms because some are invalid or duplicates
+max_attempts: 5        # samples of the same prompt before giving up on min_terms
+temperature: 0.8
+top_p: 0.9
+
+lc_classes:  # same groups as eval_landcover_alignment.yaml; the fine names of `ids` are the class definition
+  water:     {ids: [18],         name: "water"}
+  forest:    {ids: [1, 2, 5, 6], name: "forest"}
+  shrubland: {ids: [8, 11],      name: "shrubland"}
+  grassland: {ids: [10, 12],     name: "grassland"}
+  wetland:   {ids: [14],         name: "wetland"}
+  cropland:  {ids: [15],         name: "cropland"}
+  barren:    {ids: [13, 16],     name: "barren land"}
+  urban:     {ids: [17],         name: "urban area"}
+  snow_ice:  {ids: [19],         name: "snow and ice"}

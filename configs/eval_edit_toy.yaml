@@ -7,15 +7,15 @@ device: "cuda"
 seed: 42
 
 # Base MS-CLIP model
-model_ckpt: "MIXLOSS_HIGHLR10X_MSCLIP_SITS_ONLY/MSClipFacto-17-f1-0.46.ckpt"
+model_ckpt: "CLEAR_BUG_ORDER_NORM_MIXLOSS_MSCLIP_HIGH10X_SITS_ONLY/MSClipFacto-15-f1-0.47.ckpt"
 model_path: "${paths.root_dir}/results/models/${model_ckpt}"
 config_name: "config_file.yaml"
 
 # Trained probe checkpoint. The probe configuration below points to its frozen SAE.
-probe_checkpoint_path: "${paths.log_dir}/train-probe/runs/2026-10-22_08-27-40/checkpoints/epoch_017.ckpt"
+probe_checkpoint_path: "${paths.log_dir}/train-probe/runs/2026-11-05_22-11-16/checkpoints/epoch_019.ckpt"
 probe:
-  sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/checkpoints/epoch_018.ckpt"
-  alive_mask_path: "${paths.log_dir}/train-sae/runs/2026-10-18_09-35-58/alive_mask.pt"
+  sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/checkpoints/epoch_019.ckpt"
+  alive_mask_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/alive_mask.pt"
 MODEL:
   architecture: "MSClipFacto"
   out_H: 26
@@ -58,5 +58,16 @@ DATASETS:
     hard: False
 
 # Optional CSV with a `term` column matching the SAE vocabulary embedding order.
-vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
-output_dir: "${paths.log_dir}/train-probe/runs/2026-10-22_08-27-40/water_edit"
+vocab_csv_path: null #"${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
+output_dir: "${paths.log_dir}/train-probe/runs/2026-11-05_22-11-16/water_edit"
+
+# Probe edit: the top_n positive-weight features closest to `terms` get a new fire weight.
+flag_test: False # If true, evaluate the edited probe on the test set as well. Otherwise, only on the validation set.
+edit:
+  terms: ["river", "lake", "ocean", "sea", "water"] #, "stream", "pond", "reservoir", "canal"]
+  prompt_template: null  # null: raw terms | e.g. "A satellite view of {}"
+  top_n: 10
+  min_positive_weight: 0  # Only features with a fire weight above this value can be selected
+  source: "atom"  # term: nearest vocabulary term of the atom (needs an SAE vocabulary) | atom: SAE dictionary atom
+  mode: "negative_percentile"  # zero: w = 0 | negative_percentile: w = -percentile of |w| over the negative weights
+  percentile: 90  # Only used by negative_percentile

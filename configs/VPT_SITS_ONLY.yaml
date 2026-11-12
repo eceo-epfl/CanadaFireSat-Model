@@ -23,7 +23,7 @@ MODEL:
   use_cls_fusion: False
   upscale_factor: 1
   clearclip:
-    enabled: False
+    enabled: True
     n_last: 1
     keep_ffn: False        # should be false for ClearCLIP
     keep_residual: False   # should be false for ClearCLIP
@@ -31,7 +31,8 @@ MODEL:
   vpt_config:
     enabled: True
     num_tokens: 20
-    total_d_layer: 11
+    total_d_layer: 10
+    strip_before_clearclip: True  # True: ClearCLIP block sees no prompts (use with total_d_layer: 10 when n_last: 1)
 
 SOLVER:
   num_epochs: 20
@@ -105,7 +106,7 @@ DATASETS:
 
 CHECKPOINT:
   load_from_checkpoint:
-  experiment_name: "BUG_ORDER_NORM_MIXLOSS_VPT_HIGH10X_SITS_ONLY"
+  experiment_name: "STRIP_MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY"
   save_path: "./results/models"
   train_metrics_steps: 200
   save_steps: 10000

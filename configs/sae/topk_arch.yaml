@@ -28,6 +28,6 @@ criterion_kwargs:
 arch_kwargs:
   points_from: "vocab"
   csv_path: null #"${paths.dict_path}/pke_yake_general_f1k2n5max1500000parserFalse_homogeneous.csv"
-  npy_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1_embed.npy" #"${paths.dict_path}/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy"
+  npy_path: "${paths.dict_path}/pke_yake_general_f1k2n3max1500000parserFalse_homogeneous_10000_labels.npy" #"${paths.dict_path}/spacy_msclip_general_f1k2n5max1500000parserFalse_homogeneous_30000_centroids.npy"
   delta: 1.
   use_multiplier: True

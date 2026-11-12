@@ -25,13 +25,13 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
-from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from experiments.concept_bottleneck.eval.landcover_utils import (
     N_LC_IDS, LandCoverTokenDataset, build_group_matrix, class_text_embeddings, compute_class_metrics,
-    load_year_dataset, nanmean, plot_auroc_per_class, ungrouped_lc_ids,
+    load_year_dataset, multiclass_accuracy, nanmean, plot_auroc_per_class, top_percentile_precision,
+    ungrouped_lc_ids,
 )
 from experiments.concept_bottleneck.eval.utils import load_img_model, log_metrics
 from experiments.concept_bottleneck.sae.utils import get_pylogger
@@ -73,51 +73,6 @@ def patch_embeddings(model, batch: Dict[str, torch.Tensor], variants: List[str],
         if "frame_mean" in variants:
             out["frame_mean"] = frames[: t_last + 1].mean(dim=0)
     return out
-
-
-# ----------------------------------------------------------------------------------------------------------
-# Metrics
-# ----------------------------------------------------------------------------------------------------------
-def top_percentile_precision(
-    scores: np.ndarray, frac: np.ndarray, pos_threshold: float, percentiles: List[float]
-) -> Dict[str, float]:
-    """Precision of the tokens whose score is above the q-th percentile of this class's scores."""
-    base_rate = float((frac >= pos_threshold).mean())
-    metrics = {"base_rate": base_rate}
-    for q in percentiles:
-        top = scores >= np.percentile(scores, q)
-        precision = float((frac[top] >= pos_threshold).mean())
-        metrics[f"n_top@p{q:g}"] = int(top.sum())
-        metrics[f"prec@p{q:g}"] = precision  # top tokens whose class fraction >= pos_threshold
-        metrics[f"prec_any@p{q:g}"] = float((frac[top] > 0).mean())  # top tokens containing the class at all
-        metrics[f"mean_frac@p{q:g}"] = float(frac[top].mean())
-        metrics[f"lift@p{q:g}"] = precision / base_rate if base_rate > 0 else float("nan")
-    return metrics
-
-
-def zero_shot_accuracy(
-    scores: np.ndarray, frac: np.ndarray, min_fraction: float, class_keys: List[str]
-) -> tuple[Dict[str, float], pd.DataFrame, pd.DataFrame]:
-    """Argmax-over-classes accuracy on tokens whose dominant class covers >= min_fraction of the token."""
-    n_classes = len(class_keys)
-    keep = frac.max(axis=1) >= min_fraction
-    y_true, y_pred = frac[keep].argmax(axis=1), scores[keep].argmax(axis=1)
-    cm = confusion_matrix(y_true, y_pred, labels=np.arange(n_classes))  # rows: true, cols: predicted
-    support, predicted = cm.sum(axis=1), cm.sum(axis=0)
-    recall = np.where(support > 0, np.diag(cm) / np.maximum(support, 1), np.nan)
-    precision = np.where(predicted > 0, np.diag(cm) / np.maximum(predicted, 1), np.nan)
-    n_eval = int(keep.sum())
-    summary = {
-        "n_eval_tokens": n_eval,
-        "accuracy": float(np.diag(cm).sum() / n_eval) if n_eval else float("nan"),
-        "balanced_accuracy": nanmean(recall.tolist()),  # mean recall over classes present / same as macro-accuracy
-        "majority_accuracy": float(support.max() / n_eval) if n_eval else float("nan"),
-        "chance_balanced_accuracy": 1.0 / max(int((support > 0).sum()), 1),
-    }
-    per_class = pd.DataFrame({"class": class_keys, "support": support, "n_predicted": predicted,
-                              "recall": recall, "precision_cls": precision})
-    confusion = pd.DataFrame(cm, index=[f"true_{k}" for k in class_keys], columns=[f"pred_{k}" for k in class_keys])
-    return summary, per_class, confusion
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -185,8 +140,8 @@ def evaluate_landcover_zeroshot(cfg: DictConfig):
     percentiles = [float(q) for q in cfg.top_percentiles]
     rows, acc_rows = [], []
     for method in methods:
-        acc_summary, acc_per_class, confusion = zero_shot_accuracy(
-            scores_all[method], frac_all, float(cfg.accuracy_min_fraction), class_keys
+        acc_summary, acc_per_class, confusion = multiclass_accuracy(
+            scores_all[method].argmax(axis=1), frac_all, float(cfg.accuracy_min_fraction), class_keys
         )
         confusion.to_csv(output_dir / f"confusion_{method}.csv")
         acc_rows.append({"method": method, **acc_summary})

@@ -167,19 +167,20 @@ class SAEProbe(pl.LightningModule):
 
     def forward(self, x: torch.Tensor, batch_size: int) -> torch.Tensor:
         """Forward pass of the probe."""
-        out = self.probe(self.encode(x)) # B*P,C
-        out = rearrange(
-            out,
+        z = self.encode(x) # B*P,n_alive
+        z = rearrange(
+            z,
             '(b h w) c -> b c h w',
             b=batch_size,
-            h=int((out.shape[0] // batch_size) ** 0.5),
-            w=int((out.shape[0] // batch_size) ** 0.5),
+            h=int((z.shape[0] // batch_size) ** 0.5),
+            w=int((z.shape[0] // batch_size) ** 0.5),
         )
-        out = F.interpolate(
-            out, size=(self.hparams.out_H, self.hparams.out_W),
+        z = F.interpolate(
+            z, size=(self.hparams.out_H, self.hparams.out_W),
             mode="bilinear", align_corners=False
         )
-        return rearrange(out, 'b c h w -> b h w c') # For segmentation tasks, the output is [B, H, W, C] where C is the number of classes.
+        z = rearrange(z, 'b c h w -> b h w c')
+        return self.probe(z) # For segmentation tasks, the output is [B, H, W, C] where C is the number of classes.
 
     def _task_loss(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return self.loss_fn(logits.reshape(-1, self.num_classes), y.reshape(-1).long())

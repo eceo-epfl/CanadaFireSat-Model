@@ -21,10 +21,10 @@ sae_lr: 5e-4
 
 MODEL:
   architecture:  "MSClipFacto"
-  out_H: 26
-  out_W: 26
+  out_H: 16          # label grid = token grid (256 / 16)
+  out_W: 16
   input_img_res: 264
-  img_res: 260
+  img_res: 256       # center crop 264 -> 256: the 16x16 token grid covers the whole crop, centered in the tile
   test_max_seq_len: null
 
 DATASETS:
@@ -78,17 +78,21 @@ num_workers: 8
 pos_threshold: 0.5                       # positive: fraction >= tau ; negative: fraction == 0 ; mixed dropped
 threshold_sweep: [0.0, 0.25, 0.5, 0.75]  # 0.0 means "any pixel > 0"
 
-# Class text used by mapping.class_text: "raw" = class name, "template" = this template.
+top_percentiles: [99.0, 99.9]            # pre only: precision of tokens above this percentile of the class score
+accuracy_min_fraction: 0.5               # accuracy on tokens whose dominant class covers >= this fraction
+
+# Class texts: "raw" = class name, "template" = this template.
 prompt_template: "A satellite view of {}"
 
-# Atom -> class mapping (cosine in MS-CLIP text space).
+# Atom -> class ranking (cosine in MS-CLIP text space). Exclusive: an atom only ranks for its closest class,
+# so a class can have fewer than n atoms (reported as underfilled).
 mapping:
-  source: "term"          # "term": nearest-vocab-term embedding of the atom | "atom": atom dictionary vector
-  class_text: "template"  # class embedding to compare against: "raw" | "template"
-  sim_threshold: 0.6      # tune with atom_class_mapping_*.csv and the coverage sweep
-  exclusive: True         # an atom is only assigned to its argmax class
-  coverage_sweep: [0.5, 0.6, 0.7, 0.8]
+  sources: ["atom"]         # "term": nearest-vocab-term embedding of the atom | "atom": atom dictionary vector
+  class_texts: ["raw", "template"]
+  top_n: [1, 5, 10, 20]
 
+activation_norm: "none"   # "none": raw activations | "zscore": per-atom z-score, adds one pass; results go to landcover_alignment_{year}_zscore
+metric_workers: 8       # threads for the per-class metrics
 untrained_seed: 0
 plot: True
 

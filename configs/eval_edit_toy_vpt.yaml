@@ -61,3 +61,13 @@ DATASETS:
 # Optional CSV with a `term` column matching the SAE vocabulary embedding order.
 vocab_csv_path: "${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
 output_dir: "${paths.log_dir}/train-probe/runs/2026-10-22_08-27-40/water_edit"
+
+# Probe edit: the top_n positive-weight features closest to `terms` get a new fire weight.
+edit:
+  terms: ["river", "lake", "ocean", "sea", "water", "stream", "pond", "reservoir", "canal"]
+  prompt_template: null  # null: raw terms | e.g. "A satellite view of {}"
+  top_n: 20
+  min_positive_weight: 0  # Only features with a fire weight above this value can be selected
+  source: "term"  # term: nearest vocabulary term of the atom (needs an SAE vocabulary) | atom: SAE dictionary atom
+  mode: "zero"  # zero: w = 0 | negative_percentile: w = -percentile of |w| over the negative weights
+  percentile: 90  # Only used by negative_percentile

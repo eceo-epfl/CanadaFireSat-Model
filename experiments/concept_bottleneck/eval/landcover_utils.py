@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from scipy.stats import spearmanr
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score, confusion_matrix, roc_auc_score
 from torch.utils.data import Dataset
 
 from experiments.concept_bottleneck.sae.dataset import OnlineActivationDataset
@@ -177,6 +177,63 @@ def compute_class_metrics(
 def nanmean(values: List[float]) -> float:
     values = np.asarray(values, dtype=np.float64)
     return float(np.nanmean(values)) if np.isfinite(values).any() else float("nan")
+
+
+def top_percentile_precision(
+    scores: np.ndarray, frac: np.ndarray, pos_threshold: float, percentiles: List[float]
+) -> Dict[str, float]:
+    """Precision of the tokens whose score is above the q-th percentile of this class's scores."""
+    base_rate = float((frac >= pos_threshold).mean())
+    metrics = {"base_rate": base_rate}
+    for q in percentiles:
+        top = scores >= np.percentile(scores, q)
+        precision = float((frac[top] >= pos_threshold).mean())
+        metrics[f"n_top@p{q:g}"] = int(top.sum())
+        metrics[f"prec@p{q:g}"] = precision  # top tokens whose class fraction >= pos_threshold
+        metrics[f"prec_any@p{q:g}"] = float((frac[top] > 0).mean())  # top tokens containing the class at all
+        metrics[f"mean_frac@p{q:g}"] = float(frac[top].mean())
+        metrics[f"lift@p{q:g}"] = precision / base_rate if base_rate > 0 else float("nan")
+    return metrics
+
+
+def multiclass_accuracy(
+    y_pred: np.ndarray, frac: np.ndarray, min_fraction: float, class_keys: List[str]
+) -> tuple[Dict[str, float], pd.DataFrame, pd.DataFrame]:
+    """Accuracy on tokens whose dominant class covers >= min_fraction of the token.
+
+    y_pred holds one class index per token, or -1 for "no prediction" (e.g. no active atom). No prediction counts
+    as an error in the all-token metrics, and is excluded from the *_active metrics.
+    """
+    n_classes = len(class_keys)
+    keep = frac.max(axis=1) >= min_fraction
+    y_true = frac[keep].argmax(axis=1)
+    pred = np.where(y_pred[keep] < 0, n_classes, y_pred[keep])  # last column: no prediction
+    # Rows: true class, columns: predicted class + no prediction
+    cm = confusion_matrix(y_true, pred, labels=np.arange(n_classes + 1))[:n_classes]
+    correct = np.diag(cm[:, :n_classes])
+    support, predicted = cm.sum(axis=1), cm[:, :n_classes].sum(axis=0)
+    support_active = cm[:, :n_classes].sum(axis=1)
+    recall = np.where(support > 0, correct / np.maximum(support, 1), np.nan)
+    recall_active = np.where(support_active > 0, correct / np.maximum(support_active, 1), np.nan)
+    precision = np.where(predicted > 0, correct / np.maximum(predicted, 1), np.nan)
+    n_eval, n_active_eval = int(support.sum()), int(support_active.sum())
+    summary = {
+        "n_eval_tokens": n_eval,
+        "accuracy": float(correct.sum() / n_eval) if n_eval else float("nan"),
+        "balanced_accuracy": nanmean(recall.tolist()),  # mean recall over classes present / same as macro-accuracy
+        "majority_accuracy": float(support.max() / n_eval) if n_eval else float("nan"),
+        "chance_balanced_accuracy": 1.0 / max(int((support > 0).sum()), 1),
+        "abstain_rate": 1.0 - n_active_eval / n_eval if n_eval else float("nan"),
+        "n_active_eval": n_active_eval,
+        "accuracy_active": float(correct.sum() / n_active_eval) if n_active_eval else float("nan"),
+        "balanced_accuracy_active": nanmean(recall_active.tolist()),
+        "majority_accuracy_active": float(support_active.max() / n_active_eval) if n_active_eval else float("nan"),
+    }
+    per_class = pd.DataFrame({"class": class_keys, "support": support, "n_predicted": predicted,
+                              "recall": recall, "precision_cls": precision})
+    confusion = pd.DataFrame(cm, index=[f"true_{k}" for k in class_keys],
+                             columns=[f"pred_{k}" for k in class_keys] + ["pred_none"])
+    return summary, per_class, confusion
 
 
 # ----------------------------------------------------------------------------------------------------------

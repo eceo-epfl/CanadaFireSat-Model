@@ -8,8 +8,8 @@ device: "cuda"
 seed: 42
 
 # Checkpoint (no SAE needed for the zero-shot baseline)
-model_dir: "VPTFIX_MIXLOSS_VPT_HIGH10X_SITS_ONLY"
-model_ckpt: "${model_dir}/MSClipFacto-18-f1-0.48.ckpt"
+model_dir: "STRIP_MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY"
+model_ckpt: "${model_dir}/MSClipFacto-16-f1-0.48.ckpt"
 model_path: "${paths.root_dir}/results/models/${model_ckpt}"
 config_name: "config_file.yaml"
 

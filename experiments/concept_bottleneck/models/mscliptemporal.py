@@ -306,6 +306,7 @@ class MSClipTemporalCBM(nn.Module):
                 total_d_layer=vpt_config.get("total_d_layer", 11),
                 prompt_dim=self.mix_dim,
                 dropout=vpt_config.get("dropout", 0.1),
+                strip_before_clearclip=vpt_config.get("strip_before_clearclip", False),
             )
         else:
             self.vpt = None

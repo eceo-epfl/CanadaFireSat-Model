@@ -7,3 +7,4 @@ accelerate
 huggingface_hub
 pandas
 wordfreq
+hydra-core
