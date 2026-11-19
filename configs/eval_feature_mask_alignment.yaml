@@ -1,0 +1,77 @@
+defaults:
+  - _self_
+  - global_config
+  - sae: topk.yaml
+
+# Runtime
+device: "cuda"
+seed: 42
+eval_split: "val"   # train, val or test: tiles used for the percentile threshold and the top tiles
+num_workers: 8
+max_tiles: null     # debug cap on the number of tiles (applies to both passes)
+
+# Checkpoints (one SAE and the image model it was trained on)
+model_ckpt: "CLEAR_BUG_ORDER_NORM_MIXLOSS_MSCLIP_HIGH10X_SITS_ONLY/MSClipFacto-15-f1-0.47.ckpt"
+model_path: "${paths.root_dir}/results/models/${model_ckpt}"
+config_name: "config_file.yaml"
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/checkpoints/epoch_019.ckpt"
+alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/alive_mask.pt"
+input_shape: 512
+nb_concepts: 2048
+nb_k: 20
+sae_lr: 5e-4
+
+# Vocabulary: a single CSV, encoded on the fly with the SAE text encoder (sae.text_enc_kwargs).
+vocab_csv_path: "${paths.dict_path}/landcover_vocab/manual_vocab_landcover.csv"
+vocab_column: "term"                    # ONE column per run: "term" or "class_name"
+vocab_class_column: "class_name"        # mask colour = land-cover class of the entry
+text_batch_size: 128
+
+# Selection and ranking
+top_n_features: 5     # features per vocabulary entry (top-n by cosine, a feature can serve several entries)
+top_k_tiles: 5        # tiles shown per feature
+percentile: 99.9      # threshold = this percentile of the feature's pre-codes over all patches of eval_split
+save_pdf: False
+
+output_dir: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56"
+
+MODEL:
+  architecture:  "MSClipFacto"
+  out_H: 16          # token grid (256 / 16), as in eval_landcover_alignment.yaml
+  out_W: 16
+  input_img_res: 264
+  img_res: 256
+  test_max_seq_len: null
+
+DATASETS:
+  kwargs:
+    mean_file: "${paths.msclip_bands_mean}"
+    std_file: "${paths.msclip_bands_std}"
+    with_loc: False
+    with_doy: True
+    use_msclip_norm: True
+    trans_type: "msclip"
+    bands:
+      - B2
+      - B3
+      - B4
+      - B5
+      - B6
+      - B7
+      - B8
+      - B8A
+      - B11
+      - B12
+  train:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 24
+    num_workers: 8
+  eval:
+    paths: "${paths.split}"
+    base_dir: ["${paths.pos_sits}", "${paths.neg_sits}"]
+    label_dir: "${paths.label}"
+    batch_size: 1
+    num_workers: 1
+    hard: False

@@ -5,10 +5,10 @@ export CUDA_VISIBLE_DEVICES=0
 export CUDA_LAUNCH_BLOCKING=1.
 
 max_epochs=20
-experiment="clearclip-1e-4-l1-warmup-cosine-probe-training"
-model_ckpt="CLEAR_BUG_ORDER_NORM_MIXLOSS_MSCLIP_HIGH10X_SITS_ONLY/MSClipFacto-15-f1-0.47.ckpt"
-sae_folder_path="2026-11-04_22-41-56"
-sae_epoch_num="epoch_019"
+experiment="clear-vpt-1e-4-l1-warmup-cosine-probe-training"
+model_ckpt="STRIP_MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY/MSClipFacto-16-f1-0.48.ckpt"
+sae_folder_path="2026-11-17_05-10-05"
+sae_epoch_num="epoch_017"
 lr_base=5e-5
 lr_min=1e-6
 lr_start=1e-6

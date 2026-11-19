@@ -96,10 +96,18 @@ def compute_text_patch_metrics(cfg: DictConfig):
 
     ### Concept Extraction Clustering vs Frequency Filtering
     if cfg["concept_ext"] == "freq":
-        output_name = Path(cfg["concept_path"]).stem + f"_size{cfg['dict_size']}"
+
         concept_df = pd.read_csv(cfg["concept_path"]).sort_values("frequency", ascending=False)
-        concept_list = concept_df["concept"].tolist()[:cfg["dict_size"]]
-        concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"]) # [num_concepts, D]
+        concept_df = concept_df.loc[concept_df["frequency"] >= cfg["min_freq"]]
+        concept_df[["concept"]].rename(columns={"concept": "term"}).to_csv(Path(cfg["concept_path"]).parent / f"{Path(cfg['concept_path']).stem}_freq_size_{len(concept_df)}_label.csv", index=False)
+        output_name = Path(cfg["concept_path"]).stem + f"freq_size{len(concept_df)}"
+        concept_list = concept_df["concept"].tolist()
+        concept_embed = batch_encode_text(concept_list, batch_size=cfg["batch_size_text"], with_norm=False) # [num_concepts, D]
+        np.save(Path(cfg["concept_path"]).parent / f"{Path(cfg['concept_path']).stem}_freq_size_{len(concept_df)}_embed.npy", concept_embed.numpy())
+        concept_embed = F.normalize(concept_embed, dim=-1)
+
+        raise Exception("Stop")
+
     elif cfg["concept_ext"] == "all":
         output_name = Path(cfg["concept_path"]).stem
         concept_df = pd.read_csv(cfg["concept_path"])

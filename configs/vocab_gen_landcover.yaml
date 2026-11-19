@@ -15,13 +15,40 @@ max_attempts: 5        # samples of the same prompt before giving up on min_term
 temperature: 0.8
 top_p: 0.9
 
-lc_classes:  # same groups as eval_landcover_alignment.yaml; the fine names of `ids` are the class definition
-  water:     {ids: [18],         name: "water"}
-  forest:    {ids: [1, 2, 5, 6], name: "forest"}
-  shrubland: {ids: [8, 11],      name: "shrubland"}
-  grassland: {ids: [10, 12],     name: "grassland"}
-  wetland:   {ids: [14],         name: "wetland"}
-  cropland:  {ids: [15],         name: "cropland"}
-  barren:    {ids: [13, 16],     name: "barren land"}
-  urban:     {ids: [17],         name: "urban area"}
-  snow_ice:  {ids: [19],         name: "snow and ice"}
+lc_classes:  # same groups (ids) as eval_landcover_alignment.yaml; `definition` is a short plain description given to the LLM
+  water:
+    ids: [18]
+    name: "water"
+    definition: "open water such as lakes, rivers, ponds and reservoirs, with a dark and smooth surface"
+  forest:
+    ids: [1, 2, 5, 6]
+    name: "forest"
+    definition: "land covered by trees with a mostly closed canopy, either conifer, broadleaf or mixed"
+  shrubland:
+    ids: [8, 11]
+    name: "shrubland"
+    definition: "land dominated by low woody shrubs, with patches of bare ground, lichen or moss between them"
+  grassland:
+    ids: [10, 12]
+    name: "grassland"
+    definition: "open land covered by grasses and other low plants, with few or no trees or shrubs"
+  wetland:
+    ids: [14]
+    name: "wetland"
+    definition: "waterlogged land such as bogs, fens and marshes, where wet vegetation is mixed with small pools"
+  cropland:
+    ids: [15]
+    name: "cropland"
+    definition: "farm fields used to grow crops, laid out as regular geometric plots"
+  barren:
+    ids: [13, 16]
+    name: "barren land"
+    definition: "land with little or no vegetation, such as bare rock, gravel, sand or soil"
+  urban:
+    ids: [17]
+    name: "urban area"
+    definition: "built-up land made of buildings, roads, parking lots and other paved surfaces"
+  snow_ice:
+    ids: [19]
+    name: "snow and ice"
+    definition: "ground covered by snow or ice, including glaciers and ice fields"

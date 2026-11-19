@@ -104,6 +104,21 @@ def points_ext(dm: LightningDataModule, num_samples: int, img_batch_size: int,
     return torch.from_numpy(clusters)
 
 
+@torch.no_grad()
+def batch_encode_text(texts: List[str], msclip_model, tokenizer, batch_size: int,
+                      with_norm: bool = False) -> torch.Tensor:
+    """Encode ``texts`` with an MS-CLIP text tower in batches; returns [N, D] on CPU."""
+    embs = []
+    for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+        batch = texts[i:i + batch_size]
+        toks = tokenizer(batch).to(msclip_model.device)
+        e = msclip_model.inference_text(toks)
+        if with_norm:  # Attention: normalization is not needed for the SAE vocabulary
+            e = F.normalize(e, dim=-1)
+        embs.append(e.cpu())
+    return torch.cat(embs, dim=0)  # [N, D]
+
+
 def points_vocab(npy_path: Optional[os.PathLike] = None, csv_path: Optional[os.PathLike] = None,
                  vocab_size: Optional[int] = None, text_enc_kwargs: Optional[Dict[str, Any]] = {},
                  device: Optional[str] = "cuda", text_batch_size: int = 128,  **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -112,17 +127,6 @@ def points_vocab(npy_path: Optional[os.PathLike] = None, csv_path: Optional[os.P
             device=device, **text_enc_kwargs
     )
     msclip_model.to(device).eval()
-
-    @torch.no_grad()
-    def batch_encode_text(texts: List[str], batch_size: int) -> torch.Tensor:
-        embs = []
-        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
-            batch = texts[i:i + batch_size]
-            toks = tokenizer(batch).to(msclip_model.device)
-            e = msclip_model.inference_text(toks)
-            # e = F.normalize(e, dim=-1) Attention: Normalization is not needed
-            embs.append(e.cpu())
-        return torch.cat(embs, dim=0)  # [N, D]
 
     if npy_path is not None:
         dict_emb = np.load(npy_path)
@@ -134,7 +138,7 @@ def points_vocab(npy_path: Optional[os.PathLike] = None, csv_path: Optional[os.P
         dict_atom = pd.read_csv(csv_path).sort_values("frequency", ascending=False)["concept"].tolist()
         dict_atom = dict_atom[:vocab_size] if vocab_size is not None else dict_atom
 
-        dict_emb = batch_encode_text(dict_atom, text_batch_size)  # [P, D]
+        dict_emb = batch_encode_text(dict_atom, msclip_model, tokenizer, text_batch_size)  # [P, D]
     else:
         raise ValueError("Either npy_path or csv_path must be provided.")
 

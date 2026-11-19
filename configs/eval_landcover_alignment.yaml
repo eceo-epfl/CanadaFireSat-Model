@@ -9,11 +9,11 @@ device: "cuda"
 seed: 42
 
 # Checkpoints
-model_ckpt: "CLEAR_BUG_ORDER_NORM_MIXLOSS_MSCLIP_HIGH10X_SITS_ONLY/MSClipFacto-15-f1-0.47.ckpt"
+model_ckpt: "VPTFIX_MIXLOSS_VPT_HIGH10X_SITS_ONLY/MSClipFacto-18-f1-0.48.ckpt"
 model_path: "${paths.root_dir}/results/models/${model_ckpt}"
 config_name: "config_file.yaml"
-sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/checkpoints/epoch_019.ckpt"
-alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/alive_mask.pt"
+sae_ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31/checkpoints/epoch_017.ckpt"
+alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31/alive_mask.pt"
 input_shape: 512
 nb_concepts: 2048
 nb_k: 20
@@ -63,8 +63,7 @@ DATASETS:
 # The CSV must contain a column named `term`. Its row order must match the
 # vocabulary embedding file configured in configs/sae/topk.yaml.
 vocab_csv_path: #"${paths.dict_path}/apertus_output_imp_merged/apertus_selected_val_0.8_seed_2_obs_3.1.csv"
-
-output_dir: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56"
+output_dir: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31"
 
 # ---------------- Land-cover alignment ----------------
 # LC maps exist only for 2020, which belongs to the `train` split (TRAIN_FILTER 2015-2021).

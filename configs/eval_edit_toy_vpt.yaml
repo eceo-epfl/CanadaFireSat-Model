@@ -66,6 +66,8 @@ output_dir: "${paths.log_dir}/train-probe/runs/2026-10-22_08-27-40/water_edit"
 edit:
   terms: ["river", "lake", "ocean", "sea", "water", "stream", "pond", "reservoir", "canal"]
   prompt_template: null  # null: raw terms | e.g. "A satellite view of {}"
+  selection: "text"  # text: top_n features closest to `terms` | random: top_n positive-weight features drawn at random (baseline)
+  random_seed: null  # Only used by random selection; null falls back to the global seed
   top_n: 20
   min_positive_weight: 0  # Only features with a fire weight above this value can be selected
   source: "term"  # term: nearest vocabulary term of the atom (needs an SAE vocabulary) | atom: SAE dictionary atom

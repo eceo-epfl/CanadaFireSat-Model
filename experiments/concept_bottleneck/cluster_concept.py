@@ -221,7 +221,7 @@ def cluster_concept(cfg: DictConfig):
 
     #df = pd.DataFrame({"concept_closest": closest_label_centroid,
     #                   "concept_most_frequent": freq_label_centroid})
-    df = pd.DataFrame({"concept_closest": closest_label_centroid,})
+    df = pd.DataFrame({"term": closest_label_centroid,})
     df.to_csv(Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f"_{cfg.n_cluster}_centroids_label.csv"), index=False)
     print(f"[INFO] Saved {len(df)} concepts to {Path(cfg.output_dir) / (Path(cfg.concept_df_path).stem + f'_{cfg.n_cluster}_centroids_label.csv')}")
 

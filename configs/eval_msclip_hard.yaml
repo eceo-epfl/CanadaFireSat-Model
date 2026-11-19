@@ -2,11 +2,11 @@ defaults:
   - _self_
   - global_config
 
-model_path: "./results/models/MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY/MSClipFacto-18-f1-0.49.ckpt" # Need to specify exact model path
+model_path: "./results/models/STRIP_MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY/MSClipFacto-16-f1-0.48.ckpt" # Need to specify exact model path
 config_name: "config_file.yaml"
 mode: "image"
 split: "test" # test
-output_dir: "./results/models/MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY"
+output_dir: "./results/models/STRIP_MIXLOSS_VPT_CLEARCLIP_HIGH10X_SITS_ONLY"
 seed: 42
 with_region: True
 fwi_ths: [5, 10, 20, 30]
@@ -45,6 +45,7 @@ MODEL:
     enabled: True
     num_tokens: 20
     total_d_layer: 11
+    strip_before_clearclip: True
 
 SOLVER:
   num_epochs: 20

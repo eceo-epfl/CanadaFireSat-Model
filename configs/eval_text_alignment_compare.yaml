@@ -1,0 +1,53 @@
+defaults:
+  - _self_
+  - global_config
+  - sae: topk.yaml
+
+# Runtime
+device: "cuda"
+seed: 42
+
+# Base SAE hyper-parameters (shared by all runs unless overridden in `saes[i].sae_overrides`).
+input_shape: 512
+nb_concepts: 2048
+nb_k: 20
+sae_lr: 5e-4
+
+# Vocabulary: a single CSV, encoded on the fly with the SAE text encoder (sae.text_enc_kwargs).
+vocab_csv_path: "${paths.dict_path}/landcover_vocab/manual_vocab_landcover.csv"
+# Every plot is produced once per column: unique values of the column form the vocabulary.
+vocab_columns: ["term", "class_name"]
+# Column giving the class (colour) of each vocabulary entry in the dictionary embedding.
+vocab_class_column: "class_name"
+text_batch_size: 128
+
+# For each vocabulary entry, plot the mean cosine similarity over its top-n most similar features, for each n.
+top_n_list: [1, 5, 10]
+# One dictionary embedding per n: features in some entry's top-n are coloured by that entry's class.
+embedding_n_list: [5, 10]
+embedding_method: "umap"
+
+# Coverage at one top-n: a feature is covered by a vocabulary column if it is in the top-n of one of its
+# entries. Coverage is reported per column and for the union of `coverage_vocab_columns` (null = all
+# vocab_columns). Set `uncovered_top_n: null` to disable.
+uncovered_top_n: 10
+coverage_vocab_columns: null
+# Features outside the union are matched to their closest term (cosine) in this CSV (single `term` column).
+uncovered_vocab_csv_path: null
+
+# Optional extra directory for the comparison plots (they are always written to every SAE output_dir).
+output_dir: null
+
+# SAEs to compare. `sae_overrides` is merged into the `sae` config above
+# (e.g. {sae_kwargs: {nb_concepts: 4096}} or {label_path: ...}).
+saes:
+  - name: "ClearClip SAE"
+    ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/checkpoints/epoch_019.ckpt"
+    alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56/alive_mask.pt"
+    output_dir: "${paths.log_dir}/train-sae/runs/2026-11-04_22-41-56"
+    sae_overrides: {}
+  - name: "VPT SAE"
+    ckpt_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31/checkpoints/epoch_017.ckpt"
+    alive_feature_path: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31/alive_mask.pt"
+    output_dir: "${paths.log_dir}/train-sae/runs/2026-11-04_22-40-31"
+    sae_overrides: {}

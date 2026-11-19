@@ -62,12 +62,27 @@ vocab_csv_path: null #"${paths.dict_path}/apertus_output_imp_merged/apertus_sele
 output_dir: "${paths.log_dir}/train-probe/runs/2026-11-05_22-11-16/water_edit"
 
 # Probe edit: the top_n positive-weight features closest to `terms` get a new fire weight.
-flag_test: False # If true, evaluate the edited probe on the test set as well. Otherwise, only on the validation set.
+flag_test: True # If true, evaluate the edited probe on the test set as well. Otherwise, only on the validation set.
 edit:
-  terms: ["river", "lake", "ocean", "sea", "water"] #, "stream", "pond", "reservoir", "canal"]
+  terms: ["river", "lake", "ocean", "sea", "water", "stream", "pond", "reservoir", "canal"]
   prompt_template: null  # null: raw terms | e.g. "A satellite view of {}"
+  selection: "hybrid"  # text: closest to `terms` | landcover: water score vs WorldCover | hybrid: top_n//2 text + rest landcover | random: baseline
+  random_seed: null  # Only used by random selection; null falls back to the global seed
   top_n: 10
-  min_positive_weight: 0  # Only features with a fire weight above this value can be selected
+  min_positive_weight: 0.05  # Only features with a fire weight above this value can be selected
   source: "atom"  # term: nearest vocabulary term of the atom (needs an SAE vocabulary) | atom: SAE dictionary atom
   mode: "negative_percentile"  # zero: w = 0 | negative_percentile: w = -percentile of |w| over the negative weights
   percentile: 90  # Only used by negative_percentile
+  # Used by selection = landcover | hybrid. Scores are computed on the lc_year tiles of the train split (no val leak),
+  # from the post-TopK codes the probe uses. Entries are cached in output_dir, so changing score/percentile is cheap.
+  landcover:
+    score: "mass"  # corr: Pearson(z, water frac) | mass: sum(z*frac)/sum(z) | precision: water share of the feature's top tokens
+    percentile: 99.9  # precision only: top (100 - percentile)% of all tokens per feature (all active tokens if fewer)
+    pos_threshold: 0.5  # a token is water when its water fraction >= this
+    min_active_tokens: 10000  # features active on fewer tokens cannot be selected (noisy scores)
+    lc_year: 2020
+    lc_dirs: ["/media/data/boreal_data/LC", "/media/data/boreal_data/NEG_LC"]  # indexed by file_id (0=POS, 1=NEG)
+    water_ids: [18]
+    max_samples: null  # debug cap on the number of tiles
+    num_workers: 8
+    recompute: False  # ignore the cached entries
